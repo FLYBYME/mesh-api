@@ -91,6 +91,12 @@ Found by the first real consumer (the kanban port, `/home/ubuntu/code/kanban`). 
 - [ ] **`z.date()` across the JSON boundary.** The client emitter maps it to a TS type, but JSON has no date: what actually crosses the wire is a string, and nothing currently reconciles the two. Decide (ISO strings end to end, most likely) before a contract in production depends on the answer.
 - [ ] **MCP transport auth.** `buildMcpServer` takes a session or a session accessor and applies the same gate as REST, which is right. How an MCP client *obtains* a session is unanswered — it carries no browser cookie. Needs deciding before MCP is exposed anywhere but locally.
 
+### Phase 1 follow-up — open
+
+- [ ] **The package needs two entry points, and currently has one.** A Node consumer importing `@flybyme/mesh-api` for `createWebServer`/`buildMcpServer` crashes at startup with `ERR_UNKNOWN_FILE_EXTENSION: Unknown file extension ".css"`, because the single `src/index.ts` re-exports the browser runtime, whose components carry real `import './x.css'` side effects. Node cannot load those; only a bundler can. Introduced when the component layer landed and the `exports` map started pointing at source — `tsc` stays clean because the *types* resolve fine, so this only shows up when a server actually runs. Verified by starting the kanban gateway.
+
+  The fix is subpath exports along the split `00-overview.md` already describes: `.` serves the **exposure** half (exposure, auth, server, cli) and `./runtime` serves the **browser** half (reactivity, dom, app, router, manifest). That also enforces the boundary the spec already claims — a headless service pays nothing for a UI it never serves, and the browser half never pulls in express. Deferred only because a concurrent dispatch holds `package.json` and `src/index.ts`.
+
 ### Notes for whoever works here next
 
 - **Vitest 4 removed `environmentMatchGlobs`.** A config using it is dead code that reads as if it were routing DOM suites to happy-dom. The real mechanism is a `// @vitest-environment happy-dom` docblock at the top of each file, which has the advantage of being visible where it applies.
