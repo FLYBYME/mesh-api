@@ -25,8 +25,12 @@ Still open in this area: SSE event exposure (`events` in `WebConfig` is declared
 
 ### Phase 2 — reactivity and components
 
-- [ ] **Signals.** `signal`/`computed`/`effect`, automatic tracking, batching, glitch-free reads, disposal via `ctx.state`. Tests must prove fine-grained updates: assert that updating one bound value touches exactly one DOM node and does not recreate siblings — the specific defect being replaced.
-- [ ] **`resource`.** Async signal with loading/error, refetch-on-dependency-change, in-flight dedupe.
+- [x] **Signals** (2026-08-29). `signal`/`computed`/`effect`, automatic tracking, dynamic dependencies, batching, glitch-free diamonds, lazy computeds, purity enforcement, `createScope` disposal. `src/runtime/reactivity/`, no dependencies — not zod, not mesh — so it costs a browser bundle nothing but itself.
+- [x] **`resource`** (2026-08-29). Async signal with loading/error, refetch on dependency change, in-flight dedupe, out-of-order response discard, last-good-data retained on error.
+
+**Effects are scheduled on a microtask, not run synchronously on write.** Writes in one tick coalesce into one flush; `flushSync()` forces it, and is what tests use. Worth stating plainly because a write followed immediately by an assertion reads as a bug and is not one.
+
+Verified with an independent adversarial suite (`test/reactivity.adversarial.test.ts`) written against the properties that are easy to claim and hard to get right, rather than by re-reading the dispatch's own tests: the diamond running exactly once and never on a mixed pair, an effect unsubscribing from a branch it stopped reading, a nested effect being disposed instead of leaking one instance per outer run, a stale response losing to a newer one. All held.
 - [ ] **`h()` and control flow.** Real DOM creation, function-as-binding, `When`, keyed `For` that moves rather than rebuilds nodes.
 - [ ] **Core components.** Only what the kanban board needs. Grow on demand.
 - [ ] **Tokens and theming.** Light/dark via CSS custom properties, explicit override.

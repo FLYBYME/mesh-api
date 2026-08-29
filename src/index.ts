@@ -51,3 +51,26 @@ export {
     type CreateWebServerOptions,
     type CreateWebServerResult,
 } from './server/createWebServer.js';
+
+// Reactivity Core
+export type {
+    Signal,
+    ReadonlySignal,
+    Resource,
+    ReactiveScope,
+    EffectFn,
+    CleanupFn,
+    DisposeFn,
+    ResourceMutator,
+} from './runtime/reactivity/index.js';
+export {
+    signal,
+    computed,
+    effect,
+    batch,
+    untrack,
+    flushSync,
+    resource,
+    createScope,
+} from './runtime/reactivity/index.js';
+
