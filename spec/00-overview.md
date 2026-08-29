@@ -32,7 +32,9 @@ Three real reasons, not stylistic:
 2. **Gossip leaks the catalog.** The P2P layer broadcasts each node's full contract catalog — every tool, with `zodToJsonSchema`-rendered params and returns — to its peers on a timer. A browser peer receives a complete map of the internal system.
 3. **Trust model mismatch.** Mesh's own auth interceptors (`AuthInterceptorHMAC`, `AuthInterceptorEd25519`) authenticate *nodes* with a shared secret or keypair — infrastructure identity. Nothing shippable to a browser can hold that secret. End-user identity is a different problem, solved at the exposure layer (`02-auth-and-session.md`).
 
-So: the browser speaks HTTP/WebSocket to the exposure layer, which authenticates the end user, checks what that user is allowed to reach, and translates into a `broker.call` on the user's behalf. That translation boundary is the only way in. This is what "not direct mesh access" means, and it is load-bearing.
+So: the browser connects to a gateway that authenticates the end user, checks what that user is allowed to reach, and translates into a `broker.call` on the user's behalf. That translation boundary is the only way in. This is what "not direct mesh access" means, and it is load-bearing.
+
+**Refinement (see `12-network-and-federation.md`)**: the runtime reaches that gateway over a *custom mesh transport* rather than plain REST — one connection carrying RPC, events, and streams, with `BasePacket.namespace` routing calls across several sites. This does not weaken the boundary above. All three objections are to the browser being a **peer**, and none is an objection to it speaking the **protocol**: `ITransport` moves packets and grants nothing, gossip lives in `MeshOrchestrator` and only reaches nodes in its peer set, and reachability is decided by the gateway handling the REQUEST. The browser holds a client connection, never enters the peer set, and reaches exactly what `expose` lists. Identical security properties, one protocol instead of four.
 
 ## What the framework owns vs. what an app owns
 
@@ -55,4 +57,5 @@ An app owns: its own views, its own state, its own contracts. It never positions
 | `09-manifest.md` | The YAML manifest: which apps load, and how. |
 | `10-build-and-serve.md` | Bundling, dev loop, serving from a mesh service. |
 | `11-example-kanban.md` | One worked example, end to end. |
+| `12-network-and-federation.md` | The mesh client transport, namespaces, multi-site federation. |
 | `roadmap.md` | Build order, open questions, decisions not yet made. |

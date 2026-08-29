@@ -8,7 +8,22 @@ Correct URLs are a hard requirement, not a nicety. Every meaningful state of the
 
 This requires the server to serve the app shell for any unmatched path, which the exposure layer does (`10-build-and-serve.md`). Getting this right is what makes deep links, browser history, and bookmarks work — and what makes the page indexable when that matters (a storefront, a blog), which hash routing forecloses entirely.
 
-## Two levels
+## The router is namespace-aware
+
+Apps can come from more than one site (`12-network-and-federation.md`). The router prefixes each remote namespace's apps so two sites' routes can never collide:
+
+```
+/kanban/card/abc      → local app
+/b/shop/product/xyz   → app from namespace `b`, mounted at /b
+```
+
+The mount point is set by the *consuming* site's manifest, not the remote. An app does not know it is prefixed — it routes within its own subtree exactly as it would on its own site, and the same code runs unprefixed at home. The runtime strips the prefix before handing off and re-adds it when the app navigates.
+
+Namespace means one thing with three consequences: which site an app came from, which backend it talks to by default, and where it lives in the URL.
+
+## Three levels
+
+**Namespace — the runtime.** Strips the namespace prefix, if any, and dispatches to that namespace's apps.
 
 **Top level — the runtime's router.** Owns the URL, matches paths against the `page` surfaces registered by loaded Apps, decides which App is foreground, and triggers on-route loading for an App not yet loaded (`04-lifecycle.md`).
 
@@ -31,7 +46,7 @@ defineApp({
 
 The runtime routes to the App; the App routes to the view. An App never sees paths outside its subtree, and cannot claim one.
 
-This is what resolves the site/page/view confusion: **site** is the deployment (its manifest and layout policy), **App** is the process, **page** is a surface role, **view** is routing inside one page surface.
+This is what resolves the site/page/view confusion: **namespace** is which site an app came from, **site** is the deployment (its manifest and layout policy), **App** is the process, **page** is a surface role, **view** is routing inside one page surface.
 
 ## Navigation
 

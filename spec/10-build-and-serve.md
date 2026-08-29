@@ -35,11 +35,14 @@ That single call gives the service: REST routes for the exposed contracts, MCP t
 
 `esbuild`. Fast, already proven in this ecosystem, no plugin ecosystem to manage.
 
-Three outputs:
+Four outputs:
 
 1. **Shell bundle** — runtime, compositor, router, component library. Loaded once, cached hard.
 2. **App bundles** — one per App, code-split, fetched on load (`04-lifecycle.md`).
-3. **Generated client** — types and fetch wrappers derived from the exposed contracts.
+3. **Generated client** — types and call wrappers derived from the exposed contracts.
+4. **App catalog** — `/apps/catalog.json`, listing each app this site publishes with its version, bundle URL, SRI hash, and surface roles. This is what makes a site consumable by another (`12-network-and-federation.md`); a deployment that federates with nobody simply has a catalog nobody reads.
+
+App bundles are built to be loadable by a *foreign* shell, not only this site's own: the runtime API an app depends on comes from the host shell at load time rather than being bundled in. Otherwise every federated app would ship a duplicate framework and two runtimes would fight over the same page.
 
 Codegen runs before bundling. Changing a contract regenerates the client, and any App using a field that no longer exists fails to compile — the failure lands at build time, in the right place, rather than at runtime in a browser.
 
@@ -61,10 +64,15 @@ The exposure layer serves:
 |---|---|
 | `/` and any unmatched path | App shell HTML (History API requires this — `07-routing.md`) |
 | `/assets/*` | Bundles and static assets, content-hashed, immutable caching |
-| `/api/*` | Exposed contracts as REST |
-| `/api/events` | SSE stream for exposed events |
+| `/mesh` | The runtime's mesh transport endpoint — RPC, events, streams (`12-network-and-federation.md`) |
+| `/apps/catalog.json` | Published app catalog, for federating consumers |
+| `/api/*` | Exposed contracts as REST — the public, standards-facing surface |
 | `/mcp` | MCP endpoint |
 | `/api/openapi.json` | Generated OpenAPI document |
+
+`/mesh` and `/api/*` are two encodings of one policy-gated surface, both fed by the same `expose` list and the same session auth. The runtime uses the former; MCP clients, integrations, and `curl` use the latter.
+
+Serving a catalog to another origin needs CORS for that origin, and asset responses need `Access-Control-Allow-Origin` for federating consumers. This is deliberately narrow: consumers are named in a manifest, so the allowed origins are a known list, never `*`.
 
 The shell is small and cacheable; Apps stream in after.
 

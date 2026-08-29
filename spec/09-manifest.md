@@ -21,6 +21,17 @@ layout:
     enabled: true
     hotkey: "Ctrl+`"
 
+remotes:
+  - namespace: b
+    origin: https://b.example.com
+    mount: /b
+    apps:
+      - id: shop
+        integrity: "sha384-…"          # pinned; a changed bundle will not execute
+        version: "1.4.2"
+        surfaces:
+          - { role: panel, slot: sidebar.secondary, order: 40 }
+
 apps:
   - id: dashboard
     module: ./apps/dashboard.js
@@ -63,6 +74,21 @@ Adding the deployment-spec UI to a running console is those seven lines plus the
 A storefront manifest declaring no sidebar at all runs the same Apps; their `panel` requests are simply refused, and their `page` surfaces work normally.
 
 `order` sets deterministic ordering within a slot. Apps do not compete for position at runtime.
+
+## Remotes
+
+`remotes` declares other sites this deployment federates with (`12-network-and-federation.md`). Each entry opens a namespaced connection (`namespace`), mounts that site's apps under a URL prefix (`mount`), and lists — **explicitly, per app** — which of its apps to load.
+
+Rules, all mandatory:
+
+- **No wildcards.** Every remote app is named. Adding one is a reviewed manifest change.
+- **`integrity` is required.** The bundle hash is pinned; a mismatch fails to load. The remote cannot silently ship different code into this page.
+- **`version` is pinned**, upgraded deliberately. Federating across an unannounced upgrade is how a working site breaks overnight.
+- The consuming site chooses the local `namespace` alias, so two remotes can never collide here regardless of what they call themselves.
+
+Remote apps go through this site's compositor under this site's layout policy — their surface requests can be refused exactly like a local app's (`03-runtime-model.md`).
+
+**This is a trust decision, not a configuration detail.** Loading another site's JavaScript gives that site full control of this page: same origin, same DOM, same session. The controls above ensure the code is *what was approved*; they do not make it *safe*. Federate with properties you control or genuinely trust.
 
 ## Load strategies
 
