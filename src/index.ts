@@ -126,3 +126,36 @@ export {
     EmptyState,
     ErrorState,
 } from './runtime/dom/index.js';
+
+// App Runtime & Compositor
+export type {
+    SurfaceRole,
+    SurfaceRefusalReason,
+    SurfaceResult,
+    SurfaceRequest,
+    SurfaceDefinition,
+    AppLifecycleState,
+    AppStateContainer,
+    AppContext,
+    AppDefinition,
+    LayoutRegionPolicy,
+    LayoutPolicy,
+    AppHostOptions,
+    AppHost,
+    LeakableResource,
+} from './runtime/app/index.js';
+export {
+    defineApp,
+    getRegisteredApp,
+    getAllRegisteredApps,
+    clearAppRegistry,
+    createAppHost,
+    AppHostImpl,
+    Compositor,
+    AppInstance,
+    AppContextImpl,
+    AppStateContainerImpl,
+    MemoryStorage,
+    AppLeakError,
+    assertNoAppLeaks,
+} from './runtime/app/index.js';

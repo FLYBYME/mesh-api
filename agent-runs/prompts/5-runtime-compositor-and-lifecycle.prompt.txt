@@ -1,0 +1,123 @@
+You are working in /home/ubuntu/code/mesh-api. Read the spec first — it is the authority:
+
+  spec/00-overview.md      (philosophy; what the framework owns vs what an app owns)
+  spec/03-runtime-model.md (**this dispatch** — App, Surface, Role, compositor, placement)
+  spec/04-lifecycle.md     (**this dispatch** — load/foreground/background/unload, state ownership)
+  spec/05-reactivity.md, spec/06-components.md (already built — the substrate you use)
+  spec/07-routing.md, spec/09-manifest.md (NOT this dispatch — a later one; read for context only)
+
+## What already exists and is DONE
+
+- `src/runtime/reactivity/` — `signal`/`computed`/`effect`/`batch`/`untrack`/`flushSync`/`resource`/`createScope`. 990 lines, fully tested.
+- `src/runtime/dom/` — `h()`, `When`, keyed `For`, bindings, `attachScope`/`disposeElement`, a small component set, `tokens.css`.
+- `src/exposure/`, `src/auth/`, `src/server/` — REST, MCP, OpenAPI, sessions.
+
+Read `src/runtime/dom/index.ts` and `src/runtime/reactivity/index.ts` for the real surfaces. Do not
+modify either directory.
+
+**Effects are scheduled on a microtask, not run synchronously on write.** `flushSync()` forces a
+flush and is what tests use. **DOM test files need a `// @vitest-environment happy-dom` docblock**
+at the top — `environmentMatchGlobs` does not exist in Vitest 4, so there is no config-level
+routing and a file without the docblock silently has no `document`.
+
+## What you are building: `src/runtime/app/`
+
+### 1. `defineApp`
+
+```ts
+defineApp({
+  id: 'kanban',
+  title: 'Kanban',
+  surfaces: [ { role: 'page', route: '/kanban/*', mount(el, ctx) { ... } } ],
+});
+```
+
+Self-registers into a module-level registry on import, mirroring how mesh's own `defineContract`
+self-registers. Adding an App means writing its file and listing it in a manifest — nothing else in
+the system changes. A duplicate `id` throws at registration, naming both.
+
+### 2. Surfaces and roles — the load-bearing constraint
+
+A surface request declares **what kind of thing this is, never where it goes**. The complete role
+set is in spec/03's table; it is closed, and adding a role is a framework decision. An open-ended
+role vocabulary would reintroduce exactly the placement free-for-all this design exists to prevent.
+
+**An app can never position itself.** This is Wayland's client/compositor split, adopted because
+"extensions showing up in unexpected places" was a real, observed `mesh-ui` problem. The app asks;
+the compositor decides. Make that structural — an app must have no API by which it *could* place
+itself, so misbehaviour is impossible rather than merely discouraged.
+
+### 3. The compositor
+
+Owns placement. Takes a layout policy (regions and which roles each accepts — for now passed in
+directly; the YAML manifest that produces it is a later dispatch) and resolves each surface request
+to a real DOM container, or refuses it.
+
+**Refusal is a normal, explicit outcome, not an error.** A `panel` request under a layout with no
+sidebar is refused, and the app must handle that — it renders without its panel, exactly as the
+same app would when running under a different site's shell. Make refusal impossible to ignore: it
+must not be a silently-dropped promise or a `null` that reads as "not ready yet".
+
+Also the compositor's job, so every app gets it free: `Escape` closes `popup` and `overlay`
+surfaces, and focus is trapped in an overlay while open and restored to its opener on close.
+
+### 4. Lifecycle
+
+`registered → loaded → foreground ⇄ background → unloaded`, with hooks per spec/04.
+
+**Backgrounded is not torn down.** A backgrounded app keeps its state, its subscriptions, and its
+DOM; it may throttle polling. This is the whole point of the task-switching model — the console
+must be able to switch away from a live terminal and back without losing the session.
+
+`onUnload` must genuinely release everything: effects disposed, DOM removed, listeners detached,
+resources cancelled. Write a dev-mode leak assertion that fails loudly if an app leaves an effect
+running after unload, and a test that proves it catches a deliberately leaky app.
+
+### 5. Per-app state — `ctx.state`
+
+Each app gets an isolated container built on `createScope`. Everything created through it is
+disposed on unload.
+
+```ts
+ctx.state.signal(initial)      // scoped signal
+ctx.state.persisted(key, init) // survives unload, namespaced per app
+```
+
+**There is no global store**, and no app can reach another app's state. Persisted keys are
+namespaced per app so two apps cannot collide, and one app cannot read another's persisted values
+by guessing a key. Test that.
+
+## Tests — `test/app/*.test.ts`, with the happy-dom docblock
+
+At minimum:
+  - a refused surface request is delivered to the app as an explicit, un-ignorable outcome
+  - an app cannot position itself: there is no API for it (assert on the shape of the context an
+    app receives)
+  - backgrounding preserves state, subscriptions, and DOM; foregrounding restores without a remount
+  - `onUnload` releases everything, and the leak assertion catches an app that does not
+  - two apps' `persisted` values under the same key do not collide, and neither can read the other's
+  - `Escape` closes an overlay and focus returns to the element that opened it
+
+## Rules
+
+- **Do not `git commit`.** Leave the work in the working tree.
+- **Zero `as any`, `as unknown as`, `as never`.** Absolute. `mesh-ui`'s `getChildren()` returning
+  `element.children` cast to `BaseComponent[]` is a real runtime bug caused by exactly this.
+- **No dependencies.**
+- `npm run typecheck` and `npx vitest run` must pass clean, with **all existing 133 tests still
+  passing**.
+- Comments explain *why*, not *what*. House style: `src/exposure/broker.ts`,
+  `src/runtime/reactivity/effect.ts`.
+- Do NOT touch `src/runtime/reactivity/`, `src/runtime/dom/`, `src/exposure/`, `src/auth/`,
+  `src/server/`, `src/cli/`, `package.json`, or `spec/`. You own `src/runtime/app/`, `test/app/`,
+  and your export block in `src/index.ts`.
+- Do NOT build the router or the YAML manifest. Those are the next dispatch, and building them
+  half-way here would collide with it. Take the layout policy as a plain object parameter.
+
+## Finish by printing
+
+  1. Each file created, one line each.
+  2. The exact commands you ran and their real output, including the existing suites still passing.
+  3. For each test listed above, the test name that proves it.
+  4. Anything in spec/03 or spec/04 that is wrong, underspecified, or that you could not build.
+     Say so plainly — that feedback is worth more than the code.
