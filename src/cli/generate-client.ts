@@ -4,6 +4,7 @@ import path from 'node:path';
 import { z, type ToolContract, globalContractRegistry } from '@flybyme/mesh';
 import { CSRF_HEADER } from '../auth/session.js';
 import type { ExposeEntry } from '../exposure/types.js';
+import { DEFAULT_BASE_PATH } from '../exposure/paths.js';
 
 export interface CodegenContext {
     readonly toolKey: string;
@@ -310,7 +311,7 @@ export function generateClient(
 
     // Emit createApiClient factory function
     out.push(`export function createApiClient(options: ApiClientOptions = {}): ApiClient {`);
-    out.push(`  const baseUrl = options.baseUrl ?? ${JSON.stringify(options?.baseUrl ?? '')};`);
+    out.push(`  const baseUrl = options.baseUrl ?? ${JSON.stringify(options?.baseUrl ?? DEFAULT_BASE_PATH)};`);
     out.push(`  const customFetch = options.fetch ?? globalThis.fetch;`);
     out.push(``);
     out.push(`  return {`);

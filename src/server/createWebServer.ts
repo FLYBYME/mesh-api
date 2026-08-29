@@ -7,6 +7,7 @@ import type { SessionStore, SessionUser } from '../auth/types.js';
 import { MemorySessionStore } from '../auth/MemorySessionStore.js';
 import { readSessionId, type CookieOptions } from '../auth/session.js';
 import { mountAuthRoutes } from './authRoutes.js';
+import { DEFAULT_BASE_PATH } from '../exposure/paths.js';
 
 export interface CreateWebServerOptions {
     readonly app: IMeshApp;
@@ -92,7 +93,7 @@ export function createWebServer(options: CreateWebServerOptions): CreateWebServe
     });
 
     // Mount under basePath (default /api)
-    const basePath = options.basePath ?? '/api';
+    const basePath = options.basePath ?? DEFAULT_BASE_PATH;
     if (basePath === '' || basePath === '/') {
         rootRouter.use(apiRouter);
     } else {
