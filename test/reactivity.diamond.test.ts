@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { signal, computed, effect, batch } from '../src/index.js';
+import { signal, computed, effect, batch } from '../src/runtime/index.js';
 
 describe('reactivity: glitch-free diamond dependency', () => {
     it('executes terminal effect exactly once per root change without intermediate glitch state', () => {

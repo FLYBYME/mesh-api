@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { signal, computed, effect } from '../src/index.js';
+import { signal, computed, effect } from '../src/runtime/index.js';
 
 describe('reactivity: signal', () => {
     it('initializes with a value and can be read by calling it', () => {

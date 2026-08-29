@@ -1,0 +1,102 @@
+You are working in /home/ubuntu/code/mesh-api. Read the spec first — it is the authority:
+
+  spec/07-routing.md   (**this dispatch**)
+  spec/09-manifest.md  (**this dispatch**)
+  spec/03-runtime-model.md, spec/04-lifecycle.md  (the runtime you plug into — already built)
+  spec/12-network-and-federation.md  (namespace-aware routing — read the namespace sections)
+
+## What already exists and is DONE — do not modify any of it
+
+  src/runtime/reactivity/  signal/computed/effect/batch/untrack/flushSync/resource/createScope
+  src/runtime/dom/         h(), When, keyed For, bindings, a small component set, tokens.css
+  src/runtime/app/         defineApp, createAppHost, Compositor, AppInstance, AppContext,
+                           AppStateContainer, lifecycle, leak assertions
+  src/exposure/, src/auth/, src/server/, src/cli/   REST, MCP, OpenAPI, sessions, client codegen
+
+Read `src/runtime/app/index.ts` and `src/runtime/app/types.ts` before writing anything — the
+`LayoutPolicy`, `SurfaceRole`, `SurfaceResult`, and `AppHost` shapes you must fit already exist and
+are tested. The compositor currently takes a `LayoutPolicy` as a plain object; your manifest loader
+is what will produce that object from YAML.
+
+Two things that will bite you if you do not know them up front:
+
+- **Effects are scheduled on a microtask, not run synchronously on write.** `flushSync()` forces a
+  flush and is what tests use.
+- **A DOM test file needs a `// @vitest-environment happy-dom` docblock at the top.** Vitest 4
+  removed `environmentMatchGlobs`, so there is no config-level routing; a file without the docblock
+  silently has no `document`.
+
+## What to build
+
+### 1. `src/runtime/router/` — the router
+
+**Real URLs, History API only. No hash routing.** Per spec/07.
+
+- Three levels, in order: **namespace → app → view**. A path resolves to which namespace an app
+  came from, which app owns the subtree, and which view within that app.
+- Route params and the query string are exposed as **signals**, so a view reading `params.id()`
+  re-renders on navigation without re-mounting.
+- Real `<a href>` navigation is intercepted for same-origin links only — middle-click,
+  cmd/ctrl-click, `target="_blank"`, and modified clicks must fall through to the browser. Getting
+  this wrong breaks open-in-new-tab, which spec/06 calls out as a thing that must work without
+  anyone implementing it.
+- Scroll and focus restoration across back/forward.
+- **Namespace prefixes** (`12-network-and-federation.md`): a remote app mounts under a prefix
+  (`/b/shop/product/xyz`) and **must not know it is prefixed** — it routes within its own subtree
+  exactly as it would at home. That transparency is the property worth testing hardest.
+
+### 2. `src/runtime/manifest/` — the YAML manifest
+
+Per spec/09. Zod-validated, since zod is already a dependency on the server side — but note the
+manifest is loaded by the **browser**, so do not pull zod into the browser bundle if the existing
+codegen boundary (`spec/01`, "no zod, no mesh imports in the browser bundle") would be violated.
+If validating in the browser genuinely requires zod, say so in your summary and explain the
+trade-off rather than quietly importing it.
+
+- `site` block, `layout` (regions and which roles each slot accepts), `apps` (id, module, load
+  strategy, auth gating, surfaces), and the `remotes` block.
+- Produces the `LayoutPolicy` the existing compositor already consumes. Do not redesign that shape.
+- **Load strategies**: `eager` and lazy. An app whose manifest marks it as requiring auth is **not
+  loaded at all** for an anonymous visitor — not hidden, not loaded (spec/02's closing section).
+- **`remotes` requires, per entry: an explicit allowlist entry, a pinned version, and an SRI hash.**
+  A remote without SRI must be a validation error, not a warning. Federation is a trust decision
+  and the spec is explicit that these are mandatory.
+- Environment overlays, per spec/09.
+
+### 3. Wire them to the existing host
+
+The router drives app activation through the existing `AppHost` (`loadApp`/`activateApp`/
+`deactivateApp`). Do not build a second lifecycle.
+
+## Tests — `test/router/` and `test/manifest/`, DOM ones with the docblock
+
+At minimum:
+  - a modified click (cmd/ctrl/middle/`target=_blank`) is NOT intercepted; a plain same-origin
+    click is
+  - route params are signals: navigating updates a bound value without re-mounting the view
+  - a prefixed remote app resolves its own internal routes identically to when it is unprefixed —
+    same app code, both mount points
+  - back/forward restores scroll position
+  - a manifest with a remote missing an SRI hash fails validation
+  - an auth-gated app is not loaded at all for an anonymous visitor (assert it never loaded, not
+    merely that it is not visible)
+
+## Rules
+
+- **Do not `git commit`.** Leave the work in the working tree.
+- **Zero `as any`, `as unknown as`, `as never`.** Absolute in this codebase.
+- **No new dependencies** except a YAML parser, which you may add. Say which and why.
+- `npx tsc -p tsconfig.check.json` and `npx vitest run` must pass clean, with **all existing 141
+  tests still passing**.
+- Comments explain *why*, not *what*. House style: `src/exposure/broker.ts`,
+  `src/runtime/reactivity/effect.ts`, `src/runtime/app/types.ts`.
+- Do NOT touch anything outside `src/runtime/router/`, `src/runtime/manifest/`, `test/router/`,
+  `test/manifest/`, and your export block in `src/index.ts`.
+
+## Finish by printing
+
+  1. Each file created, one line each.
+  2. The exact commands you ran and their real output, including the existing 141 still passing.
+  3. For each test listed above, the test name that proves it.
+  4. Anything in spec/07 or spec/09 that is wrong, underspecified, or that you could not build.
+     Say so plainly — that feedback is worth more than the code.

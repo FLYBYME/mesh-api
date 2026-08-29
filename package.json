@@ -17,6 +17,7 @@
     "@flybyme/mesh": "github:FLYBYME/mesh",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "express": "^4.21.0",
+    "yaml": "^2.9.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
@@ -31,6 +32,10 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
+    },
+    "./runtime": {
+      "types": "./src/runtime/index.ts",
+      "import": "./src/runtime/index.ts"
     },
     "./package.json": "./package.json"
   },

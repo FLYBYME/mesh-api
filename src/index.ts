@@ -1,9 +1,14 @@
-// The component modules `import './x.css'` for real, so a consumer compiling this package's source
-// needs the ambient declaration that makes a CSS side-effect import legal. A `.d.ts` sitting in
-// node_modules is not picked up on its own, so the entry point references it explicitly --
-// otherwise every consumer gets TS2882 on files they never wrote.
-/// <reference path="./runtime/dom/css.d.ts" />
-
+// `@flybyme/mesh-api` -- the EXPOSURE half: REST, MCP, OpenAPI, sessions, client codegen.
+//
+// The browser runtime lives behind `@flybyme/mesh-api/runtime` and is deliberately NOT re-exported
+// here. A single entry re-exporting both crashed any Node consumer at startup with
+// `ERR_UNKNOWN_FILE_EXTENSION: Unknown file extension ".css"`, because the component modules carry
+// real `import './x.css'` side effects that only a bundler can resolve. `tsc` stayed clean the
+// whole time -- the types resolve fine -- so it surfaced only when a server actually ran.
+//
+// This is the split `spec/00-overview.md` already describes, now enforced by the module graph
+// rather than by intention: a headless service pays nothing for a UI it never serves, and the
+// browser half never pulls in express.
 // Exposure & Module Extension
 export type { AuthLevel, ExposeEntry, EventExposeEntry, WebConfig } from './exposure/types.js';
 export { WebServiceModule } from './exposure/WebServiceModule.js';
@@ -57,105 +62,3 @@ export {
     type CreateWebServerOptions,
     type CreateWebServerResult,
 } from './server/createWebServer.js';
-
-// Reactivity Core
-export type {
-    Signal,
-    ReadonlySignal,
-    Resource,
-    ReactiveScope,
-    EffectFn,
-    CleanupFn,
-    DisposeFn,
-    ResourceMutator,
-} from './runtime/reactivity/index.js';
-export {
-    signal,
-    computed,
-    effect,
-    batch,
-    untrack,
-    flushSync,
-    resource,
-    createScope,
-} from './runtime/reactivity/index.js';
-
-// DOM & Components Runtime
-export type {
-    Child,
-    DOMChild,
-    PrimitiveChild,
-    DynamicChild,
-    Props,
-    Component,
-    EventHandler,
-    StackProps,
-    RowProps,
-    TextProps,
-    HeadingProps,
-    ButtonProps,
-    InputProps,
-    CardProps,
-    BadgeProps,
-    SpinnerProps,
-    EmptyStateProps,
-    ErrorStateProps,
-} from './runtime/dom/index.js';
-export {
-    h,
-    When,
-    For,
-    bindClass,
-    bindStyle,
-    bindAttr,
-    bindText,
-    attachScope,
-    getScope,
-    disposeElement,
-    registerCleanup,
-    setAttributeOrProperty,
-    Stack,
-    Row,
-    Text,
-    Heading,
-    Button,
-    Input,
-    Card,
-    Badge,
-    Spinner,
-    EmptyState,
-    ErrorState,
-} from './runtime/dom/index.js';
-
-// App Runtime & Compositor
-export type {
-    SurfaceRole,
-    SurfaceRefusalReason,
-    SurfaceResult,
-    SurfaceRequest,
-    SurfaceDefinition,
-    AppLifecycleState,
-    AppStateContainer,
-    AppContext,
-    AppDefinition,
-    LayoutRegionPolicy,
-    LayoutPolicy,
-    AppHostOptions,
-    AppHost,
-    LeakableResource,
-} from './runtime/app/index.js';
-export {
-    defineApp,
-    getRegisteredApp,
-    getAllRegisteredApps,
-    clearAppRegistry,
-    createAppHost,
-    AppHostImpl,
-    Compositor,
-    AppInstance,
-    AppContextImpl,
-    AppStateContainerImpl,
-    MemoryStorage,
-    AppLeakError,
-    assertNoAppLeaks,
-} from './runtime/app/index.js';

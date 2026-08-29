@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { signal, effect, resource, createScope, flushSync } from '../src/index.js';
+import { signal, effect, resource, createScope, flushSync } from '../src/runtime/index.js';
 
 describe('reactivity: ReactiveScope', () => {
     it('disposes all effects and resources created inside scope.run()', () => {

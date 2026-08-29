@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { signal, resource, flushSync } from '../src/index.js';
+import { signal, resource, flushSync } from '../src/runtime/index.js';
 
 describe('reactivity: resource', () => {
     it('initializes loading, transitions data on resolve', async () => {

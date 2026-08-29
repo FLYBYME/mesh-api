@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { signal, computed, effect, flushSync } from '../src/index.js';
+import { signal, computed, effect, flushSync } from '../src/runtime/index.js';
 
 describe('reactivity: computed', () => {
     it('derives and caches values', () => {

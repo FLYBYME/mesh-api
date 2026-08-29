@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { signal, computed, effect, batch, untrack, flushSync } from '../src/index.js';
+import { signal, computed, effect, batch, untrack, flushSync } from '../src/runtime/index.js';
 
 describe('reactivity: effect', () => {
     it('runs immediately upon creation and re-runs on dependency changes', () => {
