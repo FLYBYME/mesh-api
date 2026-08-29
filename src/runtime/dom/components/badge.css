@@ -1,0 +1,54 @@
+/**
+ * Badge: status and metadata tag
+ */
+.mesh-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mesh-font-sans);
+  font-weight: var(--mesh-font-weight-medium);
+  line-height: 1;
+  border-radius: var(--mesh-radius-full);
+  box-sizing: border-box;
+  white-space: nowrap;
+}
+
+.mesh-badge-size-sm {
+  font-size: var(--mesh-font-size-xs);
+  padding: 0.125rem 0.375rem;
+}
+
+.mesh-badge-size-md {
+  font-size: var(--mesh-font-size-sm);
+  padding: 0.25rem 0.5rem;
+}
+
+.mesh-badge-variant-default {
+  background-color: var(--mesh-color-bg-muted);
+  color: var(--mesh-color-text-secondary);
+}
+
+.mesh-badge-variant-primary {
+  background-color: var(--mesh-color-primary-subtle);
+  color: var(--mesh-color-primary);
+}
+
+.mesh-badge-variant-success {
+  background-color: var(--mesh-color-success-subtle);
+  color: var(--mesh-color-success);
+}
+
+.mesh-badge-variant-warning {
+  background-color: var(--mesh-color-warning-subtle);
+  color: var(--mesh-color-warning);
+}
+
+.mesh-badge-variant-danger {
+  background-color: var(--mesh-color-danger-subtle);
+  color: var(--mesh-color-danger);
+}
+
+.mesh-badge-variant-info {
+  background-color: var(--mesh-color-info-subtle);
+  color: var(--mesh-color-info);
+}

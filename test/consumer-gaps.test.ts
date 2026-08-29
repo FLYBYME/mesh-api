@@ -39,7 +39,14 @@ describe('consumer regressions', () => {
         app.use(express.json());
         const broker = {
             call: async () => ({ pong: true }),
-            logger: { info() {}, warn() {}, error() {}, debug() {} },
+            logger: {
+                info() {},
+                warn() {},
+                error() {},
+                debug() {},
+                child() { return this; },
+                getLevel() { return 0; },
+            },
         };
         mountMcpRoute(app, { broker, expose: exposed, info: { name: 'demo', version: '0.0.1' } });
 

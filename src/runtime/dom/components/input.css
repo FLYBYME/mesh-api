@@ -1,0 +1,36 @@
+/**
+ * Input: accessible text input control
+ */
+.mesh-input {
+  font-family: var(--mesh-font-sans);
+  font-size: var(--mesh-font-size-sm);
+  line-height: var(--mesh-line-height-normal);
+  color: var(--mesh-color-text-primary);
+  background-color: var(--mesh-color-bg-surface);
+  border: 1px solid var(--mesh-color-border);
+  border-radius: var(--mesh-radius-md);
+  padding: var(--mesh-space-2) var(--mesh-space-3);
+  box-sizing: border-box;
+  width: 100%;
+  transition: border-color var(--mesh-transition-fast), box-shadow var(--mesh-transition-fast);
+}
+
+.mesh-input::placeholder {
+  color: var(--mesh-color-text-muted);
+}
+
+.mesh-input:focus-visible {
+  outline: none;
+  border-color: var(--mesh-color-primary);
+  box-shadow: var(--mesh-focus-ring);
+}
+
+.mesh-input:disabled {
+  background-color: var(--mesh-color-bg-subtle);
+  color: var(--mesh-color-text-muted);
+  cursor: not-allowed;
+}
+
+.mesh-input:read-only {
+  background-color: var(--mesh-color-bg-subtle);
+}

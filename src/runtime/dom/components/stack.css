@@ -1,0 +1,25 @@
+/**
+ * Stack: vertical flex layout container
+ */
+.mesh-stack {
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.mesh-stack-gap-xs { gap: var(--mesh-space-1); }
+.mesh-stack-gap-sm { gap: var(--mesh-space-2); }
+.mesh-stack-gap-md { gap: var(--mesh-space-4); }
+.mesh-stack-gap-lg { gap: var(--mesh-space-6); }
+.mesh-stack-gap-xl { gap: var(--mesh-space-8); }
+
+.mesh-stack-align-start { align-items: flex-start; }
+.mesh-stack-align-center { align-items: center; }
+.mesh-stack-align-end { align-items: flex-end; }
+.mesh-stack-align-stretch { align-items: stretch; }
+
+.mesh-stack-justify-start { justify-content: flex-start; }
+.mesh-stack-justify-center { justify-content: center; }
+.mesh-stack-justify-end { justify-content: flex-end; }
+.mesh-stack-justify-between { justify-content: space-between; }
+.mesh-stack-justify-around { justify-content: space-around; }

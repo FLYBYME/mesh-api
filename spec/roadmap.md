@@ -31,9 +31,11 @@ Still open in this area: SSE event exposure (`events` in `WebConfig` is declared
 **Effects are scheduled on a microtask, not run synchronously on write.** Writes in one tick coalesce into one flush; `flushSync()` forces it, and is what tests use. Worth stating plainly because a write followed immediately by an assertion reads as a bug and is not one.
 
 Verified with an independent adversarial suite (`test/reactivity.adversarial.test.ts`) written against the properties that are easy to claim and hard to get right, rather than by re-reading the dispatch's own tests: the diamond running exactly once and never on a mixed pair, an effect unsubscribing from a branch it stopped reading, a nested effect being disposed instead of leaking one instance per outer run, a stale response losing to a newer one. All held.
-- [ ] **`h()` and control flow.** Real DOM creation, function-as-binding, `When`, keyed `For` that moves rather than rebuilds nodes.
-- [ ] **Core components.** Only what the kanban board needs. Grow on demand.
-- [ ] **Tokens and theming.** Light/dark via CSS custom properties, explicit override.
+- [x] **`h()` and control flow** (2026-08-29). Real DOM creation, function-as-binding, `When`, keyed `For`.
+- [x] **Core components** (2026-08-29). Stack, Row, Text, Heading, Button, Input, Card, Badge, Spinner, EmptyState, ErrorState — only what a kanban board needs. The catalogue grows on demonstrated demand.
+- [x] **Tokens and theming** (2026-08-29). Light/dark via CSS custom properties with an explicit `[data-theme]` override.
+
+Verified independently (`test/dom/independent-verification.test.ts`) on the properties that are about **node identity**, since that is what `updateProps()`'s `innerHTML = ''` destroyed and a test asserting on rendered text cannot tell updating a node from replacing it with an identical one: a bound update leaves every sibling node *object* untouched; a keyed `For` reorder returns the same node objects at new positions; an insert and a remove leave survivors identical; and — the concrete user-visible proof — **focus and a half-typed input value survive a reorder**. Plus: a bound `value` is set as a property, not an attribute (as an attribute it is only the default value, so a controlled input silently stops updating once the user types), and a `When`-unmounted subtree's effects stop rather than leaking.
 
 ### Phase 3 — runtime
 
@@ -82,12 +84,17 @@ Found by the first real consumer (the kanban port, `/home/ubuntu/code/kanban`). 
 
 - [x] **MCP transport reuse** (fixed 2026-08-29). A single stateless `StreamableHTTPServerTransport` built at startup throws `Stateless transport cannot be reused across requests` on the *second* call — so it passed every smoke test and 500'd in use, the worst failure shape there is. `mountMcpRoute` now builds server and transport per request, and a regression test asserts two consecutive requests both return 200. Verified the old pattern genuinely fails, rather than assuming it.
 - [x] **Base path disagreement** (fixed 2026-08-29). `createWebServer` mounted under `/api` while `generateClient` defaulted `baseUrl` to `''`, so a client generated without an explicit option 404'd against its own server. Neither file was wrong alone; the default now lives in one place (`src/exposure/paths.ts`) that both import, pinned by a test.
-- [ ] **The package cannot be imported by name.** `package.json` points `main`/`types` at `./dist/`, which is never built, and has no `exports` map — so a consumer gets `TS2307: Cannot find module '@flybyme/mesh-api'` and has to write `@flybyme/mesh-api/src/index.js`. Needs an `exports` map, a `prepack` build, or both. Deferred only because a concurrent dispatch holds `package.json`.
+- [x] **The package can be imported by name** (fixed 2026-08-29). `main`/`types`/`exports` now point at `./src/index.ts` rather than a `./dist/` no lifecycle ever built. Source-first is right for a `file:` dependency inside this monorepo: a consumer's own `tsc` sees real types with no build step. Verified by switching the kanban port to a bare `@flybyme/mesh-api` import and compiling it. That surfaced a second problem immediately — the component modules `import './x.css'` for real, and a `.d.ts` inside `node_modules` is not picked up on its own, so every consumer got `TS2882` on files they never wrote. `src/index.ts` now carries a triple-slash reference to `runtime/dom/css.d.ts`.
 - [ ] **The generated client is `.ts`, which a browser cannot load.** A plain HTML page with no bundler cannot `<script type="module">` a TypeScript file, so the first consumer had to keep hand-written fetch calls — the typed client's whole purpose, unmet for exactly the deployment shape (a small service with a `public/` directory) this framework is supposed to make easy. Emit `.js` + `.d.ts` alongside the `.ts`. Generate both from the same model rather than adding a transpiler dependency.
 
 - [ ] **Port `kanban` onto this package.** Its hand-written gateway (`/home/ubuntu/code/kanban/src/gateway/`) is now redundant, and it exposes every registered contract with no gate — exactly what the exposure policy forbids. First real consumer, and the honest test of whether `mountWeb` is pleasant to use.
 - [ ] **`z.date()` across the JSON boundary.** The client emitter maps it to a TS type, but JSON has no date: what actually crosses the wire is a string, and nothing currently reconciles the two. Decide (ISO strings end to end, most likely) before a contract in production depends on the answer.
 - [ ] **MCP transport auth.** `buildMcpServer` takes a session or a session accessor and applies the same gate as REST, which is right. How an MCP client *obtains* a session is unanswered — it carries no browser cookie. Needs deciding before MCP is exposed anywhere but locally.
+
+### Notes for whoever works here next
+
+- **Vitest 4 removed `environmentMatchGlobs`.** A config using it is dead code that reads as if it were routing DOM suites to happy-dom. The real mechanism is a `// @vitest-environment happy-dom` docblock at the top of each file, which has the advantage of being visible where it applies.
+- **Effects are scheduled on a microtask.** A write followed immediately by a DOM assertion tests the scheduler, not your code. Call `flushSync()`.
 
 ## Open questions
 
