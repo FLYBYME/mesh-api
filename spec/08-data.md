@@ -10,6 +10,8 @@ Every App receives `ctx.api` — the generated typed client (`01-exposure.md`), 
 const { cards } = await ctx.api.kanban.board_list({ repo: 'paas' });
 ```
 
+**One client per deployment, namespaced by contract domain.** This falls out of how mesh already works rather than being a design choice: `Registry.getTools()` returns every contract on the broker, contracts are already namespaced (`kanban.card_create`, `dns.record_create`), and mesh forbids two `ServiceModule`s sharing a domain — so a process hosting many services exposes all of them under one client with no possibility of collision. A console talking to a *separately deployed* service at another origin is a different, deferred problem (`roadmap.md`).
+
 Types come from the contract's own zod schemas via codegen. Renaming a field in a contract breaks the build in every App that used it — which is the point, and is only possible because there is one schema rather than a server schema and a hand-maintained client type.
 
 The generated client is plain `fetch` plus types. **No zod, no mesh imports in the browser bundle** — the boundary from `00-overview.md` holds at the dependency level, not just by convention.

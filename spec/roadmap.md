@@ -58,16 +58,16 @@ Deliverable: any mesh service gets a real authenticated API and MCP surface. Kan
 
 ## Open questions
 
-- [ ] **Package name and boundary.** This is `mesh-api`, but it now covers API *and* UI. Either the name broadens in meaning or it becomes something like `mesh-app`. Decide before anything depends on the name. The one thing settled: **it is one package, not two.**
-- [ ] **Does `mountWeb` belong in `@flybyme/mesh` itself?** The stated shape is "the mesh package with the kitchen sink, plus at most one other package for UI." If `mountWeb` lives in mesh core, this package supplies only the runtime and components. Affects the dependency direction.
-- [ ] **Contract-level authorization.** Exposure policy gates *reachability*, not per-record access, which stays in handlers. The framework-wide `permissions` design in `docs/03-mesh-conventions.md` remains unbuilt (paas B15: 1,130 unguarded cross-domain raw CRUD calls). Whether `mesh-api` should push that forward or stay narrowly at the public boundary is undecided.
 - [ ] **System caller pattern.** Backend services acting as themselves rather than as a user (paas B3). Explicitly *not* solved by minting a fake system user. Needs its own design with a real audit story.
 - [ ] **Child app composition details.** Apps nest recursively, but the parent↔child surface protocol is unspecified: does a child request surfaces from its parent's granted region, or from the compositor with the parent as context? Resolve before building the first nested case (cart inside a storefront).
-- [ ] **Multi-service clients.** A console talking to several mesh services (paas API, kanban, others) — does it generate one merged client or one per service, and where does cross-service auth live?
+- [ ] **Cross-deployment clients.** A console at one origin talking to a *separately deployed* service at another (e.g. a standalone kanban). Different base URL, different session cookie, CORS, independently versioned schemas — the cross-origin auth story is the hard part. Deferred deliberately until a real consumer needs it, so it gets designed against a real requirement. **Not** the same as the single-deployment case, which is already settled below.
 
 ## Decisions already made
 
 - [x] **One package, not two.** An earlier `mesh-api` + `mesh-web` split was scaffolded and deleted. UI is a feature you enable on the API, not a separate client architecture.
+- [x] **The package is `mesh-api`** (2026-08-28). The name stays and its meaning broadens: the API package, of which web/UI is a feature. Not renamed to `mesh-app`/`mesh-web`.
+- [x] **`mountWeb` lives in this package, not mesh core** (2026-08-28). A service imports `mesh-api` and mounts it explicitly. Mesh core stays free of express/MCP/bundler dependencies, so a headless service (a weather microservice, a reconciler) pays nothing for a UI it never serves. Cost is one import line.
+- [x] **One client per deployment, namespaced by contract domain** (2026-08-28). Not a real decision so much as a consequence of how mesh already works: `Registry.getTools()` returns every contract on the broker, contracts are already namespaced (`dns.record_create`, `kanban.card_create`), and mesh forbids two `ServiceModule`s sharing a domain — so collisions are impossible. A single `mountWeb` on a process hosting many services exposes all of them under one client. Cross-*deployment* clients are a separate, deferred question (see above).
 - [x] **The browser never joins the mesh.** Three concrete reasons in `00-overview.md`: total contract reachability, gossip leaking the full catalog, and node-vs-user trust mismatch. Not revisitable without solving all three.
 - [x] **No React, no JSX, no virtual DOM.** A vDOM makes full re-renders cheap; fine-grained reactivity removes full re-renders. Paying for the former to solve what the latter already fixed is a bad trade.
 - [x] **Fine-grained reactivity, not re-render.** Directly replaces `mesh-ui`'s `updateProps()` `innerHTML` wipe.
@@ -78,3 +78,4 @@ Deliverable: any mesh service gets a real authenticated API and MCP surface. Kan
 - [x] **Real URLs, History API only.** No hash routing.
 - [x] **Nothing exposed by default.** Explicit `expose` lists with required per-entry `auth`.
 - [x] **Client-side auth gating is UI shaping, never enforcement.** Real checks are server-side, on every call.
+- [x] **Authorization scope: the public boundary only** (2026-08-28). `mesh-api` gates what is reachable from outside; per-record checks stay in handlers where the data is. The framework-wide `permissions: string[]` + role-glob + broker-gate design in `docs/03-mesh-conventions.md` (paas B15, 1,130 unguarded cross-domain raw CRUD calls) stays a separate mesh-core project — real, still open, but not blocking this package.

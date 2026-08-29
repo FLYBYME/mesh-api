@@ -20,6 +20,8 @@ Every future project is a mesh app: a kanban board, a trading bot, a store websi
 
 These are not two packages and not two products. The UI is **built in and first class**: a mesh service enables `web` the same way it mounts a tool or a CRUD collection today. An earlier iteration of this design split them into `mesh-api` (exposer) and `mesh-web` (separate UI framework consuming the exposed REST as an external client). That split was rejected: it forced every UI project to re-solve wiring the two together, and made the UI a second-class client of its own backend instead of a native feature of it.
 
+**The package keeps the name `mesh-api`, with its meaning broadened**: the API package, of which web is a feature. And `mountWeb` lives here, not in `@flybyme/mesh` core — so mesh core stays free of express/MCP/bundler dependencies and a headless service (a reconciler, a weather microservice with no UI) pays nothing for a feature it never uses. The cost is one import line in a service that does want the web.
+
 ## Hard boundary: the browser never joins the mesh
 
 `@flybyme/mesh` ships real browser transports (`BrowserWebSocketTransport`, `HTTPTransport`, `WebRTCTransport`). A browser page *could* join the mesh network directly as a peer. **It must not, and this framework will not offer it as an option.**
