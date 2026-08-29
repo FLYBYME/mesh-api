@@ -1,0 +1,145 @@
+You are working in /home/ubuntu/code/mesh-api. Start by reading the spec — it is the authority for
+every decision below, and it is short:
+
+  spec/00-overview.md   (philosophy, the browser-never-joins-the-mesh boundary)
+  spec/01-exposure.md   (contract -> REST/MCP/typed client, and the exposure policy)
+  spec/roadmap.md       (Phase 1 is what you are building)
+
+## What this package is
+
+`mesh-api` is the package a `@flybyme/mesh` service adds when it wants to face the outside world.
+It is a translator: it reads the `ToolContract`s already registered on a mesh broker and projects
+them outward into REST, MCP, and a generated typed client. **One zod schema is the single source of
+truth** for mesh's own validation, the REST route, the MCP tool, the client types, and the docs.
+There is never a second place to declare a shape. You are building three of those projections.
+
+The mesh framework source is at /home/ubuntu/code/mesh (installed at node_modules/@flybyme/mesh).
+Read the real source before assuming an API shape:
+
+  src/interfaces/IToolContract.ts  -- ToolContract { domain, action, description, inputSchema,
+                                      outputSchema, rest: { method, path, isStream? }, print,
+                                      destructive?, isCrud?, event?, timeout? }, plus `toolKey()`
+  src/interfaces/IServiceBroker.ts -- broker.call(tool, params, { meta })
+  src/core/Registry.ts             -- registry.getTools(): ToolContract[]
+
+A cruder single-purpose version of the MCP adapter exists at
+/home/ubuntu/code/kanban/src/gateway/mcp.ts. Read it for orientation — it is roughly right in
+shape. You are building the general version. Its one real flaw: it exposes every registered
+contract with no gate, which spec/01's exposure policy forbids.
+
+## Files that already exist and are DONE — read them, use them, do not rewrite them
+
+  src/exposure/types.ts    -- AuthLevel, ExposeEntry, EventExposeEntry, WebConfig
+  src/exposure/errors.ts   -- toHttpError(err)
+  src/exposure/input.ts    -- coerceToSchema(), objectShapeOf(), formatZodError()
+  src/auth/*               -- session store, cookies, CSRF, checkAuth()
+
+## What to build
+
+### 1. `src/exposure/mcp.ts`
+
+`buildMcpServer(broker, exposed, info)` — one MCP tool per **exposed** contract (an
+`ExposeEntry[]`, not the whole registry), named `<domain>.<action>`, with `description` and input
+schema taken straight from the contract. Generic: nothing in it knows what domain it serves.
+
+  - `@modelcontextprotocol/sdk`'s `registerTool` wants the raw *shape* (the object's fields), not
+    the `z.ZodObject` itself — `objectShapeOf()` in src/exposure/input.ts already extracts it and
+    handles wrapper types. A contract whose input is not an object schema must throw at build time
+    with the tool key named, not fail per-call later.
+  - Contract descriptions in this codebase are already written for tool-callers, so MCP needs no
+    extra annotation. Do not invent a second description field.
+  - Mark `destructive` contracts with the SDK's destructive/readOnly tool annotations if the
+    installed SDK version supports them — check the real installed typings, do not guess.
+  - MCP is a second *encoding* of the same `expose` list, never a second reachability. A contract
+    absent from `expose` must be absent here. Prove it with a test.
+  - Auth: MCP callers reach this over a transport that does not carry a browser cookie session. Do
+    NOT invent a credential scheme for it in this dispatch. Take the resolved `SessionUser | undefined`
+    as a parameter (or a per-request accessor) and pass it into `broker.call`'s `meta.user`
+    exactly as the REST path does, and apply `checkAuth(entry.auth, session)` before every call so
+    the gate is identical on both surfaces. Say in your summary that how an MCP client obtains a
+    session is unresolved — it is a real open question and the spec does not answer it.
+
+### 2. `src/exposure/openapi.ts`
+
+`buildOpenApiDocument(exposed, info)` -> an OpenAPI 3.1 document for the exposed set, generated
+from the same schemas. Nothing hand-maintained.
+
+  - `zod-to-json-schema` is already a dependency of `@flybyme/mesh` (mesh's own `Registry.ts` uses
+    it) — use it rather than adding another dependency or hand-rolling a converter.
+  - `contract.rest.path`'s `:param` segments become OpenAPI `{param}` path parameters. A field in
+    `inputSchema` that appears in the path is a path parameter; on a GET, remaining fields are
+    query parameters; otherwise they are the request body. Get this right — it is what makes the
+    document actually usable rather than decorative.
+  - Responses: 200 from `outputSchema`, plus the error shape `{ error: { code, message } }` for
+    4xx/5xx (see src/exposure/errors.ts for the exact body).
+  - Reflect the gate: `auth: 'public'` entries carry no security requirement; `user`/`admin` do.
+  - `description` becomes the operation description; `destructive` is worth surfacing.
+
+### 3. `src/cli/generate-client.ts`
+
+The typed client generator, exposed as the `mesh-api-generate-client` bin (already declared in
+package.json). It emits a **single self-contained `.ts` file** containing plain `fetch` calls and
+TypeScript types.
+
+**The generated file must contain no zod, no mesh imports, and no schemas — zero runtime
+dependencies.** This is not a bundle-size preference: it is what makes "the browser never joins the
+mesh" (spec/00) true at the dependency level rather than only by convention. A generated file that
+imports zod has failed this dispatch regardless of whether it compiles.
+
+  - Types are emitted from the contracts' zod schemas by walking them directly. `zod-to-ts` is NOT
+    available (it peer-conflicts with TypeScript 7 and was deliberately dropped from
+    package.json — do not add it back, and do not add any other codegen dependency). Write the
+    walker. Support what this codebase's contracts actually use: object, string, number, boolean,
+    literal, enum, array, optional, nullable, default, union, record, and `z.date()`. For anything
+    unsupported, emit `unknown` and print a warning naming the tool key and field — never emit
+    `any`, and never fail silently.
+  - Shape: `api.<domain>.<action>(input)`, grouped by domain, fully typed both ways from the
+    contract's own schemas. Renaming a field in a contract must break the build in every consumer
+    that used it — that is the entire point.
+  - The client sends the CSRF header on state-changing calls and `credentials: 'include'`, and
+    surfaces the `{ error: { code, message } }` body as a thrown typed error. Read
+    src/auth/session.ts for the header name; do not re-declare it as a literal.
+  - The generated file is written to a path given on the command line. Print what it wrote.
+
+### 4. Tests — `test/mcp.test.ts`, `test/openapi.test.ts`, `test/generate-client.test.ts`
+
+`vitest` is installed. Cover, at minimum:
+
+  - MCP: an exposed contract appears as a tool and calling it round-trips through a **real broker**
+    (build a small fixture service on a real `MeshApp` — do not mock the broker); a registered but
+    NOT exposed contract does not appear; `checkAuth` is enforced (a `user`-gated tool with no
+    session is rejected).
+  - OpenAPI: path params, query params and request bodies land in the right places for GET vs POST;
+    an unexposed contract has no path; the document parses as valid JSON and has the expected
+    top-level structure.
+  - Client codegen: the generated output contains no `import` of zod or mesh and no `any`; a
+    `z.number()` field types as `number`, an optional field as `?`, an enum as a union of literals;
+    and — the test that actually matters — the generated file **type-checks**, by writing it to a
+    temp dir and running the real TypeScript compiler over it.
+
+## Rules
+
+  - **Do not `git commit`.** Leave the work in the working tree. The dispatching session commits.
+  - **Zero `as any`, `as unknown as`, `as never`.** Absolute in this codebase, and not a style
+    preference: `mesh-ui`'s `getChildren()` returning `element.children` cast to `BaseComponent[]`
+    is a real runtime bug caused by exactly this. Walking zod schemas will tempt you repeatedly —
+    use zod's own type guards (`instanceof z.ZodObject` etc.) and narrow honestly.
+  - TypeScript 7, ESM, `"moduleResolution": "Bundler"`. Relative imports carry the `.js` extension.
+  - `npx tsc --noEmit` must pass clean, and your three test files must pass.
+  - Comments explain *why*, not *what*. Match the density and voice of the files listed under
+    "already exist and are DONE" — they are the house style for this package.
+  - Do NOT touch: `src/index.ts`, `src/exposure/rest.ts`, `src/exposure/WebServiceModule.ts`,
+    `src/server/`, `test/rest.test.ts`, `test/fixtures/`, `package.json`, `tsconfig.json`, or
+    `spec/`. A second dispatch is working in those files concurrently and your edits would collide
+    with it. Export your work from its own module files only — the other dispatch owns `index.ts`
+    and will wire your exports in afterwards.
+  - Do not build: REST routing, the express server, auth routes, SSE, WebSocket, or anything from
+    the UI runtime (spec files 03 through 12). Those are later phases and other dispatches.
+
+## Finish by printing
+
+  1. Each file you created or changed, one line each, with what it does.
+  2. The exact `tsc` and `vitest` commands you ran and their real output.
+  3. Every zod type your emitter does NOT support, listed explicitly.
+  4. Anything in the spec you found to be wrong, unimplementable, or underspecified — say so
+     plainly rather than quietly working around it. That feedback is worth more than the code.

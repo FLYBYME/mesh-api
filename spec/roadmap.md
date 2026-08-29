@@ -6,15 +6,22 @@ Build order, open questions, and decisions already made. Same convention as `paa
 
 Each phase produces something real and usable. Nothing is built on speculation about a later phase.
 
-### Phase 1 — exposure (no UI yet)
+### Phase 1 — exposure (no UI yet) — **built** (2026-08-29)
 
-- [ ] **Contract → REST.** Generic route mounting from `rest.method`/`rest.path` over `Registry.getTools()`. Merge params/query/body into one input; let `inputSchema` validate. `MeshError` → status codes.
-- [ ] **Exposure policy.** `mountWeb({ expose: [...] })` with required per-entry `auth`. Nothing reachable unless listed; no wildcard.
-- [ ] **Contract → MCP.** One MCP tool per exposed contract. Generic — no domain knowledge in the adapter. *(A working prototype of this exists in `/home/ubuntu/code/kanban/src/gateway/mcp.ts` — it iterates the registry, requires `z.object` inputs, and calls `broker.call`. Lift and generalise it rather than rewriting.)*
-- [ ] **Typed client codegen.** Plain fetch + types, zero zod/mesh in the browser bundle.
-- [ ] **Auth and session.** Cookie sessions, server-side records, CSRF, `meta.user` bridge, 401 handling.
+- [x] **Contract → REST.** `mountRest` derives every route from `rest.method`/`rest.path`; params/query/body merge into one input; `MeshError` maps to status codes.
+- [x] **Exposure policy.** `WebServiceModule.mountWeb({ expose })` with required per-entry `auth`. Nothing reachable unless listed; no wildcard. Route collisions throw at mount time.
+- [x] **Contract → MCP.** One MCP tool per exposed contract, gated by the same `checkAuth`, so MCP is a second encoding of the `expose` list rather than a second reachability.
+- [x] **Typed client codegen.** Self-contained emitter; the generated file carries zero zod and zero mesh imports, verified by compiling the output in a test.
+- [x] **Auth and session.** Cookie sessions (HttpOnly/Secure/SameSite=Lax), server-side records, id rotation on login, CSRF on state-changing calls, the `meta.user` bridge, 401/403 handling.
+- [x] **OpenAPI document**, generated from the same schemas.
 
-Deliverable: any mesh service gets a real authenticated API and MCP surface. Kanban stops needing its hand-written gateway.
+Built by agy dispatches 1 and 2 (`agent-runs/`), then verified independently. What that verification caught, since none of it appeared in either dispatch's self-report:
+
+- **A global type leak.** `rest.ts` augmented `IServiceToolRegistry` with an index signature to make a runtime-chosen tool key type-check. That is a declaration-merged global, so it applied to *every project importing this package*: `broker.call('kanban.card_craete', { nonsense: 1 })` compiled clean. An `as any` with unbounded blast radius, and harder to spot because it reads as a declaration. Replaced with `ExposureBroker` in `src/exposure/broker.ts` — one structural interface, package-local, which a real `IServiceBroker` satisfies.
+- **Tests were never type-checked.** `tsconfig.json` covers only `src/**/*`, and vitest transpiles without type-checking, so a type error in a test could not fail anything. Three test files imported `../exposure/types.js` (a path that does not exist) and several unchecked `unknown` accesses sat behind casts. Added `tsconfig.check.json` + `npm run typecheck` covering `src` and `test`; fixed what it surfaced.
+- **A vacuous test.** "a registered but NOT exposed contract is 404" asserted only the 404 — which a route that was never defined also returns, so deleting the contract entirely would have kept it green. It now asserts the contract is present in `registry.getTools()` *and* unreachable over HTTP. That gap is the exposure policy, and it is the one property this package exists to guarantee.
+
+Still open in this area: SSE event exposure (`events` in `WebConfig` is declared but not yet served) — Phase 5.
 
 ### Phase 2 — reactivity and components
 
@@ -64,6 +71,12 @@ Deliverable: any mesh service gets a real authenticated API and MCP surface. Kan
 - [ ] **SSR.** Only when a real public-facing, indexable consumer exists (storefront, blog). Not needed for the console. Architecture is compatible; building it now would be speculative.
 - [ ] **Offline / service worker.** No demonstrated need.
 - [ ] **i18n.** Same.
+
+### Phase 1 follow-up
+
+- [ ] **Port `kanban` onto this package.** Its hand-written gateway (`/home/ubuntu/code/kanban/src/gateway/`) is now redundant, and it exposes every registered contract with no gate — exactly what the exposure policy forbids. First real consumer, and the honest test of whether `mountWeb` is pleasant to use.
+- [ ] **`z.date()` across the JSON boundary.** The client emitter maps it to a TS type, but JSON has no date: what actually crosses the wire is a string, and nothing currently reconciles the two. Decide (ISO strings end to end, most likely) before a contract in production depends on the answer.
+- [ ] **MCP transport auth.** `buildMcpServer` takes a session or a session accessor and applies the same gate as REST, which is right. How an MCP client *obtains* a session is unanswered — it carries no browser cookie. Needs deciding before MCP is exposed anywhere but locally.
 
 ## Open questions
 

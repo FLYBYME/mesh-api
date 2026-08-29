@@ -1,0 +1,173 @@
+You are working in /home/ubuntu/code/mesh-api. Start by reading the spec — it is the authority for
+every decision below, and it is short:
+
+  spec/00-overview.md   (philosophy, the browser-never-joins-the-mesh boundary)
+  spec/01-exposure.md   (contract -> REST/MCP/typed client, and the exposure policy)
+  spec/02-auth-and-session.md  (end-user identity, sessions, the meta.user bridge)
+  spec/roadmap.md       (Phase 1 is what you are building)
+
+## What this package is
+
+`mesh-api` is the package a `@flybyme/mesh` service adds when it wants to face the outside world:
+a real HTTP REST API, MCP, and (later) a browser UI. It is a translator. It adds no business
+logic, no resource model of its own, and no second schema language. It reads the `ToolContract`s
+already registered on a mesh broker and projects them outward.
+
+The mesh framework source is at /home/ubuntu/code/mesh (and installed at
+node_modules/@flybyme/mesh). Read the real source before assuming an API shape. The pieces that
+matter here:
+
+  src/interfaces/IToolContract.ts  -- ToolContract { domain, action, description, inputSchema,
+                                      outputSchema, rest: { method, path, isStream? }, print,
+                                      destructive?, isCrud?, event?, timeout? }, plus `toolKey()`
+                                      and `defaultPrint`
+  src/interfaces/IServiceBroker.ts -- broker.call(tool, params, { meta }), broker.registerModule
+  src/interfaces/IMeshMeta.ts      -- meta.user = { id, tenant_id, roles?, ... }
+  src/interfaces/IMeshApp.ts       -- MeshApp: use(), registerModule(), getProvider<T>(), .registry
+  src/core/ServiceModule.ts        -- the abstract base services extend (mountTool, mountCrud, ...)
+  src/core/MeshError.ts            -- MeshError({ code, status, message }), and ClientError
+  src/core/Registry.ts             -- registry.getTools(): ToolContract[]
+
+A working reference implementation of the same idea (cruder, hand-rolled, single-purpose) exists at
+/home/ubuntu/code/kanban/src/gateway/gateway.ts and .../mcp.ts. Read it for orientation. You are
+building the general version it should have been. Do not copy its shortcuts: it exposes every
+registered contract with no gate at all, which is precisely what spec/01's exposure policy forbids.
+
+## Files that already exist and are DONE — read them, use them, do not rewrite them
+
+  src/exposure/types.ts    -- AuthLevel, ExposeEntry, EventExposeEntry, WebConfig
+  src/exposure/errors.ts   -- toHttpError(err) -> { status, body, logged }
+  src/exposure/input.ts    -- coerceToSchema(), objectShapeOf(), formatZodError()
+  src/auth/types.ts        -- SessionUser, SessionRecord, SessionStore
+  src/auth/MemorySessionStore.ts
+  src/auth/session.ts      -- SESSION_COOKIE, CSRF_HEADER, setSessionCookie, clearSessionCookie,
+                              readSessionId, csrfTokenMatches, CookieOptions
+  src/auth/gate.ts         -- checkAuth(required, session) — throws MeshError 401/403
+
+If one of them is genuinely wrong, say so in your summary rather than silently rewriting it.
+
+## What to build
+
+### 1. `src/exposure/WebServiceModule.ts`
+
+`mountWeb` must be callable as `this.mountWeb({...})` from inside a service's constructor
+(spec/10-build-and-serve.md shows the exact call shape), but it must NOT be added to
+`@flybyme/mesh`'s own `ServiceModule` — mesh core stays free of express/MCP dependencies so a
+headless service pays nothing for a UI it never serves (spec/00, "Decisions already made").
+
+So: export `abstract class WebServiceModule extends ServiceModule`, adding
+
+  protected mountWeb(config: WebConfig): void
+  public getWebConfig(): WebConfig | undefined
+
+A service extends `WebServiceModule` instead of `ServiceModule` — one import line, which is the
+stated acceptable cost. Calling `mountWeb` twice must throw: a service has one public surface, and
+a silent merge would make the exposed set depend on constructor ordering.
+
+### 2. `src/exposure/rest.ts`
+
+`mountRest(router, options)` — mounts one express route per exposed contract. Generic: nothing in
+here knows what domain it is serving.
+
+  - Route path and method come from `contract.rest.path` / `contract.rest.method`. Nothing is
+    hand-wired per route, ever.
+  - Input is `{ ...req.params, ...req.query, ...req.body }` merged into one object, then
+    `coerceToSchema(contract.inputSchema, input)`, then `contract.inputSchema.safeParse(...)`.
+    A parse failure is a 400 whose message comes from `formatZodError` — read the comment at the
+    top of src/exposure/input.ts for why validating here is not a "second validation layer".
+  - The gate runs BEFORE the call: `checkAuth(entry.auth, session)`.
+  - CSRF: required on state-changing requests only — anything whose `rest.method` is not GET/HEAD,
+    or whose contract is `destructive`. Compare `CSRF_HEADER` against the session's token with
+    `csrfTokenMatches`. A `public` route with no session has no CSRF token to check, so it is
+    skipped there; document that in a comment.
+  - The call is `broker.call(toolKey, parsed, { meta: { user: session.user } })` when there is a
+    session, and with no user in meta when there is not. A missing `meta.user` means
+    unauthenticated — it must never be filled with a placeholder or "system" user (spec/02).
+  - Errors go through `toHttpError`. Log `logged` via the broker's logger; send `body`.
+  - Set a `correlationId`: accept an inbound `x-correlation-id` header, generate one when absent,
+    echo it on the response, and pass it into the call meta so it reaches mesh's logs.
+
+Only contracts in the `expose` list get routes. There is no wildcard and no `exposeAll`. If two
+exposed contracts declare the same method+path, throw at mount time with both tool keys named —
+a silent shadow would be a route that exists but can never be reached.
+
+### 3. Auth routes, in `src/server/authRoutes.ts`
+
+The "standard auth stuff, done once, correctly" from spec/02. Three routes:
+
+  POST /api/auth/login    -> delegates to a caller-supplied `authenticate(credentials)` that
+                             returns a SessionUser or null. This package never stores passwords
+                             and never implements a password policy; it owns the *session*, not
+                             the identity provider. Creates a session, sets the cookie, returns
+                             `{ user, csrfToken }`.
+  POST /api/auth/logout   -> destroys the server-side record and clears the cookie.
+  GET  /api/session       -> `{ user, csrfToken }` for a live session, or `{ user: null }`.
+
+Rotate the session id on login (session fixation — spec/02). Failed login is a 401 with a
+deliberately non-specific message, and must take the same code path whether the user does not
+exist or the password is wrong.
+
+### 4. `src/server/createWebServer.ts`
+
+Assembles it:
+
+  createWebServer({ app, modules, sessionStore?, authenticate?, cookie?, basePath? })
+
+  - Collects `getWebConfig()` from each `WebServiceModule` passed in, and builds one combined
+    exposed set. If two modules expose the same tool key, throw.
+  - Resolves the session once per request into `req` (a typed augmentation, not `as any`) so the
+    gate, CSRF and the meta bridge all read the same resolved value.
+  - Mounts `express.json()`, the auth routes, and the REST routes under `basePath` (default
+    `/api`).
+  - Returns `{ router, exposed }` — an express Router plus the resolved exposure list, so a caller
+    can mount it on their own app and so tests can assert exactly what got exposed. Do NOT call
+    `listen()` in here; the caller owns the server.
+
+### 5. `src/index.ts`
+
+The package's public exports. You own this file for this dispatch.
+
+### 6. Tests — `test/rest.test.ts`, plus fixtures in `test/fixtures/`
+
+`vitest` is installed. Build a real fixture service (a couple of contracts via `defineContract`,
+mounted on a real `MeshApp` with `RegistryModule` + `BrokerModule`, as
+/home/ubuntu/code/kanban/src/gateway/gateway.ts does) and drive it over real HTTP with `fetch`
+against a server on an ephemeral port. Do not mock the broker: the whole value of this layer is
+that it translates faithfully, and a mocked broker tests nothing.
+
+Cover, at minimum:
+  - an exposed contract is reachable and returns the contract's own output shape unchanged
+  - a registered but NOT exposed contract is 404 — this is the single most important test in the
+    package, because it is the property the whole exposure policy exists to guarantee
+  - `auth: 'user'` with no session -> 401; with a session -> 200
+  - `auth: 'admin'` with a non-admin session -> 403
+  - a state-changing route with no/incorrect CSRF token -> 403; correct -> 200
+  - invalid input -> 400, and the body names the offending field
+  - a GET with `?limit=10` reaching a `z.number()` field as the number 10
+  - a handler throwing `MeshError({ status: 404 })` -> 404 with that code
+  - a handler throwing a plain `Error` -> 500 whose body does NOT contain the thrown message
+  - login -> session cookie -> authenticated call -> logout -> same call now 401
+
+## Rules
+
+  - **Do not `git commit`.** Leave the work in the working tree. The dispatching session commits.
+  - **Zero `as any`, `as unknown as`, `as never`.** This is absolute in this codebase and is not a
+    style preference: `mesh-ui`'s `getChildren()` returning `element.children` cast to
+    `BaseComponent[]` is a real runtime bug caused by exactly this. Where express's types genuinely
+    need extending (`req.session`), use declaration merging, not a cast.
+  - TypeScript 7, ESM, `"moduleResolution": "Bundler"`. Relative imports carry the `.js` extension.
+  - `npx tsc --noEmit` must pass clean, and `npx vitest run test/rest.test.ts` must pass.
+  - Comments explain *why*, not *what*. Match the density and voice of the files listed under
+    "already exist and are DONE" — they are the house style for this package.
+  - Do NOT touch: `src/exposure/mcp.ts`, `src/exposure/openapi.ts`, `src/cli/`, `spec/`, or any
+    file under `test/` other than `test/rest.test.ts` and `test/fixtures/`. A second dispatch is
+    working in those files concurrently and your edits would collide with it.
+  - Do not build: MCP, OpenAPI, the typed-client generator, SSE, WebSocket, or anything from the
+    UI runtime (spec files 03 through 12). Those are later phases and other dispatches.
+
+## Finish by printing
+
+  1. Each file you created or changed, one line each, with what it does.
+  2. The exact `tsc` and `vitest` commands you ran and their real output.
+  3. Anything in the spec you found to be wrong, unimplementable, or underspecified — say so
+     plainly rather than quietly working around it. That feedback is worth more than the code.
