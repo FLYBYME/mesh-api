@@ -64,15 +64,16 @@ The exposure layer serves:
 |---|---|
 | `/` and any unmatched path | App shell HTML (History API requires this — `07-routing.md`) |
 | `/assets/*` | Bundles and static assets, content-hashed, immutable caching |
-| `/mesh` | The runtime's mesh transport endpoint — RPC, events, streams (`12-network-and-federation.md`) |
+| `/api/*` | Exposed contracts as REST — **the** API (`12-network-and-federation.md`) |
+| `/api/events` | SSE stream for exposed events — plain HTTP `text/event-stream` |
+| `/api/ws/*` | WebSocket, only for genuinely bidirectional sessions (terminal). No RPC. |
 | `/apps/catalog.json` | Published app catalog, for federating consumers |
-| `/api/*` | Exposed contracts as REST — the public, standards-facing surface |
 | `/mcp` | MCP endpoint |
 | `/api/openapi.json` | Generated OpenAPI document |
 
-`/mesh` and `/api/*` are two encodings of one policy-gated surface, both fed by the same `expose` list and the same session auth. The runtime uses the former; MCP clients, integrations, and `curl` use the latter.
+There is one API and the runtime uses it — no privileged channel for our own UI. MCP is a second *encoding* of the same `expose` list for tool-callers, not a second API with its own reachability.
 
-Serving a catalog to another origin needs CORS for that origin, and asset responses need `Access-Control-Allow-Origin` for federating consumers. This is deliberately narrow: consumers are named in a manifest, so the allowed origins are a known list, never `*`.
+Serving a catalog or assets to another origin needs CORS for that origin. Deliberately narrow: consumers are named in manifests, so the allowed origins are a known list, never `*`.
 
 The shell is small and cacheable; Apps stream in after.
 

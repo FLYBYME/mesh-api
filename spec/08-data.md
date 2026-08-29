@@ -42,14 +42,18 @@ board.patch(cards => cards.map(c => c.id === card.id ? card : c));
 
 ## Live updates
 
-**Superseded in mechanism by `12-network-and-federation.md`.** An earlier version of this spec specified three separate transports (polling, SSE, WebSocket). The runtime instead uses one multiplexed mesh transport per namespace: `IMeshPacket` already distinguishes `REQUEST`/`RESPONSE`/`EVENT` and already carries `streamID`, so request/response, event push, and streaming are one connection rather than three mechanisms to choose between.
+Three mechanisms, all standard HTTP, in order of preference. Use the simplest that fits — the console genuinely needs the heavier ones; a storefront does not, and should not pay for them.
 
-Polling remains available and is still the right answer for genuinely slow-changing data where a subscription is not worth holding — the kanban board is a fair example. Backgrounded Apps throttle their polling (`04-lifecycle.md`).
+**1. Polling.** A `resource` with an interval. Correct for slow-changing data, and the right answer for the kanban board. Backgrounded Apps throttle their polling (`04-lifecycle.md`). With `ETag`/`If-None-Match`, an unchanged poll costs a 304.
 
-Everything surfaces identically to an App: a signal that updates over time.
+**2. Server-sent events.** One-way server→client push, and *still plain HTTP* — a `GET` returning `text/event-stream`. The default for log tails, metrics, and status changes. Reconnects natively, passes through ordinary proxies, needs no special infrastructure.
+
+**3. WebSocket.** Only for genuinely bidirectional sessions — a live terminal. Never used to carry RPC (`12-network-and-federation.md`).
+
+All three surface identically to an App: a signal that updates over time.
 
 ```ts
-const logs = ctx.api.stream.logs({ deploymentId });   // streamID packets on the shared connection
+const logs = ctx.api.stream.logs({ deploymentId });   // SSE under the hood
 logs.data()       // Signal<LogLine[]>
 logs.connected()  // Signal<boolean>
 ```
@@ -60,7 +64,7 @@ A component rendering a live log tail and one rendering a static list are writte
 
 Mesh services already emit real per-domain events (`card.created`, `dnsRecord.updated`, and so on — the PaaS codebase completed its migration off the generic `data.*` bus, and every subscriber now uses specific named events). Those events are the natural source for live UI updates.
 
-The gateway can bridge selected events to subscribed browser clients as `EVENT` packets on their existing connection. **Selected, explicitly, exactly like contract exposure** — an event stream is a read API, and auto-bridging every internal event to browsers would leak the whole system's activity to anyone who connects:
+The gateway bridges selected events to subscribed browser clients over SSE. **Selected, explicitly, exactly like contract exposure** — an event stream is a read API, and auto-bridging every internal event to browsers would leak the whole system's activity to anyone who connects:
 
 ```ts
 this.mountWeb({

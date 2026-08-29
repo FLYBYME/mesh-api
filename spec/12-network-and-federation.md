@@ -1,74 +1,111 @@
 # 12 — Network layer, namespaces, and federation
 
-The runtime has a real network layer, not a pile of fetch calls. It is built as a **custom mesh transport**, so one connection carries RPC, events, and streams, and one client can be connected to several sites at once.
+The runtime has a real network layer: multiple namespaced backends, live updates, and cross-site federation. It is built on **standard HTTP REST**, and there is exactly one API.
 
-## Why a transport, and why this does not break the boundary
+## The API is standard HTTP REST. There is no second protocol.
 
-`00-overview.md` states the browser never joins the mesh, for three reasons: total contract reachability, gossip leaking the full catalog, and node-vs-user trust mismatch.
+One surface, standard in every respect: standard verbs, standard status codes, standard headers, standard content types, an OpenAPI document that describes all of it. Reachable with `curl`, a browser address bar, Postman, any HTTP client in any language.
 
-Those are objections to the browser being a **peer**. None of them is an objection to it speaking mesh's **protocol**. The distinction matters because mesh's own structure keeps them separate:
+**The runtime uses exactly the same API as everyone else.** No privileged channel for the framework's own UI. This is a deliberate constraint, and it is load-bearing for two reasons:
 
-- `ITransport` is five methods — `connect`, `disconnect`, `send`, `onMessage`, `onError`. It moves packets. It grants nothing.
-- Gossip is not in the transport. `MeshOrchestrator.broadcastPresence()` runs on its own 15s interval and only reaches nodes in the orchestrator's peer set. A connection that is never added to that set never receives a catalog.
-- Reachability is decided by whoever handles an inbound REQUEST, not by the wire format.
+1. **It keeps REST honest.** A framework whose own UI speaks a private protocol inevitably lets the public API rot — under-tested, half a version behind, its gaps discovered by outsiders. If our UI is the heaviest REST consumer, drift is felt immediately, by us.
+2. **It stays inside your own infrastructure.** The platform's proxy/edge terminates and logs real HTTP. A custom WebSocket protocol tunnels past access logging, caching, routing, and every standard debugging tool. Being ordinary HTTP means the existing infrastructure works, unchanged.
 
-So: **the browser holds a client transport, not a peer connection.** It is terminated server-side by a gateway that authenticates the session, enforces exposure policy per packet, attaches `meta.user`, and calls the broker. The browser never enters the peer set, never receives presence or catalog packets, and can reach exactly the contracts `expose` lists — the same policy that governs REST (`01-exposure.md`), enforced at the same place.
+A previous revision of this spec proposed a custom mesh transport as the runtime's channel, with REST as a parallel public surface. **That is reversed.** The transport idea was technically elegant — `ITransport` is five methods, `IMeshPacket` already carries `type` and `streamID` — but elegance bought a private protocol, a second-class REST API, and infrastructure bypass. Not worth it. "One way, no questions asked" (`00-overview.md`) means one API, and the API is REST.
 
-The security properties are identical to the REST design. What changes is that one protocol now carries everything.
+## Verbs, status, and shape
 
-## What this buys
+Contracts already declare `rest: { method, path }`, so routes come straight from them (`01-exposure.md`).
 
-**One channel for RPC, events, and streams.** `IMeshPacket` already has `type` (`REQUEST`/`RESPONSE`/`EVENT`/…) and `streamID`. Request/response, event push, and streaming are already distinct packet shapes in the protocol — so the separate SSE-plus-WebSocket-plus-fetch arrangement in `08-data.md` collapses into one connection that already knows how to do all three.
+- `GET` for reads, safe and cacheable. Query params for filters.
+- `POST` for actions and creates. `PUT`/`PATCH`/`DELETE` where a contract genuinely maps to them.
+- Status codes from `MeshError`'s existing `status` field — 400, 401, 403, 404, 409, 500 — which the codebase already sets correctly via `notFound`/`badRequest`/`conflict`.
+- Errors are a consistent JSON body: `{ error: { code, message } }`, with `code` from `MeshError`.
+- `ETag`/`If-None-Match` on reads, so unchanged data costs a 304 and real HTTP caching does real work.
+- `correlationId` travels as a request header and appears in logs on both sides — tracing without a bespoke envelope.
 
-**Correlation, tracing, and errors for free.** `correlationId`, `MeshError` payloads, and the `meta` tracing fields already travel in the packet. No re-invention at the HTTP layer.
+HTTP/2 multiplexes concurrent requests over one connection, which removes the main practical argument for a custom framed protocol.
 
-**Multiple sites, natively.** `BasePacket.namespace` already exists, and `IMeshNetwork` already carries a `namespace`. Routing a call to the right site is a field that is already in the protocol.
+## Live updates: SSE, and it is still standard HTTP
+
+Server-sent events are plain HTTP — a `GET` returning `text/event-stream`. No protocol upgrade, no special infrastructure, works through ordinary proxies, reconnects natively.
+
+```
+GET /api/events?topics=card.created,card.updated
+Accept: text/event-stream
+```
+
+The gateway authenticates the session, checks the requested topics against the explicitly exposed event list, enforces `scope` server-side at fan-out (`08-data.md`), and streams matching events. Same session, same auth, same origin as every other call.
+
+Long-running one-way reads — a log tail, a metrics feed — are the same mechanism.
+
+## WebSocket, only where genuinely bidirectional
+
+One real case today: an interactive terminal, where the client sends keystrokes and resize events while the server streams output. SSE cannot do that, and pretending otherwise would mean inventing a side channel.
+
+So WebSocket is used **only** for genuinely bidirectional sessions, declared per capability rather than offered as a general transport:
+
+```
+GET /api/ws/terminal   (Upgrade: websocket)
+```
+
+It authenticates with the same session, and it is not an alternative route to the REST API — no RPC is carried over it, and no contract is reachable there that is not reachable over REST.
 
 ## Namespaces
 
-A **namespace** identifies one site's API surface. The runtime holds a connection per namespace and routes by it.
+A **namespace** identifies one site's API. With REST this is simply a base URL:
 
 ```
-local   →  wss://a.example.com/mesh    (the site serving this page)
-b       →  wss://b.example.com/mesh    (a remote site, aliased locally as `b`)
+local  →  /api                          (the site serving this page)
+b      →  https://b.example.com/api     (a remote site, aliased locally as `b`)
 ```
 
-Calls are namespaced, and the typed client reflects it:
+The generated client is namespaced to match:
 
 ```ts
-await ctx.api.kanban.card_create({ ... });      // local namespace
+await ctx.api.kanban.card_create({ ... });      // local
 await ctx.api.b.shop.cart_add({ ... });         // remote site `b`
 ```
 
-The alias is chosen by the **consuming** site in its manifest, not by the remote. Site A decides what to call site B locally, so two remotes can never collide in A's client regardless of what they call themselves.
+The alias is chosen by the **consuming** site in its manifest, never by the remote, so two remotes cannot collide locally regardless of what they call themselves.
 
-Each namespace has its own connection, its own session/credential, and its own generated client types. Auth does not leak across namespaces — being signed in to A says nothing about B.
+Each namespace has its own base URL, its own credential, and its own generated client types. Auth does not leak across namespaces — a session on A says nothing about B.
 
 ## Namespace-aware routing
 
-The URL router is namespace-aware, and it is the same namespace. An app loaded from a remote site gets a URL prefix, so two sites' apps cannot collide in the address bar:
+Same namespace, applied to URLs. Remote apps are mounted under a prefix so two sites' routes cannot collide:
 
 ```
-/kanban/card/abc          → local app
-/b/shop/product/xyz       → app from namespace `b`
+/kanban/card/abc      → local app
+/b/shop/product/xyz   → app from namespace `b`
 ```
 
-The manifest sets the mount point (`09-manifest.md`). Within its prefix an app routes exactly as before (`07-routing.md`) — it does not know or care that it is mounted under a prefix, and the same app code runs unprefixed on its own site.
+The mount point is set by the consuming site's manifest. An app does not know it is prefixed — it routes within its own subtree exactly as it would at home (`07-routing.md`).
 
-**An app's namespace is its default API target.** An app loaded from `b` calls `b`'s backend by default without asking; that is the sane default, since an app shipped by a site expects to talk to that site. Reaching another namespace requires naming it explicitly.
+**An app's namespace is its default API target.** An app served by `b` calls `b`'s API without asking. Reaching another namespace requires naming it.
 
-This gives one coherent meaning to "namespace": *which site this came from, which backend it talks to, and where it lives in the URL* — one concept, three consequences.
+One concept, three consequences: which site an app came from, which backend it talks to, and where it lives in the URL.
+
+## Cross-origin
+
+Talking to another origin's REST API needs CORS done properly, and this is where "standard HTTP" has to be paid for honestly rather than hand-waved:
+
+- The remote allows the consuming origin explicitly. A **named list, never `*`** — consumers are declared in manifests, so the list is always known.
+- `Access-Control-Allow-Credentials: true` with credentialed requests, if sessions are cookie-based across origins.
+- Preflight caching (`Access-Control-Max-Age`) so `OPTIONS` is not paid per request.
+- Third-party cookie restrictions in modern browsers make cross-origin cookie sessions genuinely unreliable. **A token-based credential per namespace is the realistic answer** for cross-origin, with cookies remaining correct for same-origin. Exactly how a user's session on A becomes a credential for B is an open question (`roadmap.md`) and must be settled before the first real federated deployment — not improvised at build time.
 
 ## Federation: loading apps from another site
 
-For site A to run site B's app, B must publish it and A must opt in.
+For site A to run site B's app, B publishes and A opts in.
 
-**B publishes** an app catalog alongside its bundles (`10-build-and-serve.md`):
+**B publishes** a catalog alongside its bundles (`10-build-and-serve.md`):
 
 ```
 GET https://b.example.com/apps/catalog.json
 {
   "site": "b",
+  "runtimeApi": "1.x",
   "apps": [
     { "id": "shop", "version": "1.4.2", "module": "/assets/shop-a91f3c.js",
       "integrity": "sha384-…", "surfaces": ["page", "panel"] }
@@ -76,47 +113,25 @@ GET https://b.example.com/apps/catalog.json
 }
 ```
 
-**A opts in**, per app, in its own manifest:
+**A opts in**, per app, in its manifest (`09-manifest.md`) — explicit allowlist, pinned SRI, pinned version, locally chosen namespace alias.
 
-```yaml
-remotes:
-  - namespace: b
-    origin: https://b.example.com
-    mount: /b
-    apps:
-      - id: shop
-        integrity: "sha384-…"     # pinned; a changed bundle fails to load
-```
+B's `shop` app then runs inside A's page: its surfaces go through A's compositor under A's layout policy, its routes live under `/b`, and its API calls go to B's REST API.
 
-Then B's `shop` app runs inside A's page: its surfaces go through A's compositor under A's layout policy, its routes live under `/b`, and its API calls go to B.
+## Federation is a trust decision, stated plainly
 
-## Federation is a trust decision, and the spec says so plainly
+**Loading another site's JavaScript gives that site complete control of this page** — same origin, same DOM, same session, same everything. There is no partial version of this.
 
-**Loading another site's JavaScript gives that site complete control of this page.** Same origin, same DOM, same cookies for this origin, same session. There is no partial version of this.
+Mandatory mitigations: per-app allowlist (no wildcards), pinned Subresource Integrity (a changed bundle does not execute), CSP naming the permitted origins, pinned versions upgraded deliberately.
 
-Mitigations, all mandatory:
+And the honest limit: these guarantee the code is *what was approved*. They do not make it *safe*. Federate with properties you actually control. The realistic case is one operator's own sites — a console embedding a client-site admin panel, a storefront embedding a shared cart — not a third-party marketplace.
 
-- **Explicit allowlist per app.** No wildcard remotes, no "load whatever B offers." Adding a remote app is a reviewed change to A's manifest.
-- **Subresource Integrity, pinned.** The manifest pins a hash; a bundle that does not match does not execute. B cannot silently ship different code into A.
-- **CSP** listing exactly the permitted remote origins.
-- **Version pinning, with explicit upgrades.** Federation across an unannounced upgrade is how a working site breaks at 3am.
-
-And the honest limit: these controls make the code *what you approved*; they do not make it *safe*. Federate with a site you actually control or genuinely trust. The realistic case here is one operator's own properties — a console embedding a client-site admin panel, a storefront embedding a shared cart — not third-party marketplaces.
-
-An iframe or Worker would give real isolation, at the cost of DOM access and the composition model this framework is built on. If a genuinely untrusted federation case appears, that is the design to reach for — it is deliberately out of scope now rather than half-built.
+Real isolation would mean an iframe or Worker, at the cost of DOM access and the composition model this framework is built on. That is deliberately out of scope until a genuinely untrusted case exists, rather than half-built now.
 
 ## Connection management
 
-Owned by the runtime, uniformly across namespaces:
+Owned by the runtime, per namespace:
 
-- One multiplexed connection per namespace; all apps on that namespace share it.
-- Exponential backoff with jitter on drop; per-namespace connection-state signal for chrome to display.
-- On reconnect, resources on that namespace refetch — events missed while disconnected cannot be replayed.
-- A namespace being down degrades only its apps. A remote site going away must never take down the local one.
-- `background`-role apps (`03-runtime-model.md`) keep their subscriptions across backgrounding; the connection is not torn down on task switch.
-
-## REST and MCP still exist
-
-The transport is the **runtime's** channel. REST, MCP, and OpenAPI (`01-exposure.md`) remain the public, standards-facing surface: MCP clients, external integrations, `curl`, webhooks, anything that is not this framework.
-
-Both encodings are fed by the same `expose` list and the same session auth. That is not duplication — it is one policy-gated surface with two encodings, and the policy is defined once.
+- SSE reconnects with exponential backoff and jitter; on reconnect, affected resources refetch, since events missed while disconnected cannot be replayed.
+- A per-namespace connection-state signal lets chrome show a real indicator, and lets one site's outage degrade only its own apps.
+- A remote namespace being unreachable must never take down the local one.
+- `background`-role apps (`03-runtime-model.md`) keep their subscriptions across task switching.
