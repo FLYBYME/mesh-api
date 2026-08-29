@@ -46,6 +46,58 @@ The exposure gate cannot do (2), and pretending otherwise produces exactly the f
 
 `roles` on `meta.user` supports the coarse case (`auth: 'admin'`). Anything sharper is the handler's job.
 
+## One sign-in, across origins
+
+**No, an app does not log in on its own.** Stated plainly because the opposite is the obvious wrong
+answer and it needs closing off.
+
+Two cases, and only one of them is hard.
+
+**Same origin — one session, no exception.** Every app the shell loads from its own site shares the
+one cookie session: the console, its dev-tools app, a deployment panel, a terminal. They are the
+same origin, so they are the same session by construction. Nothing per-app happens at all, and any
+design where a same-origin app authenticates separately is a bug.
+
+**Cross origin — one sign-in, one credential per namespace.** A federated app served by another
+site (`12-network-and-federation.md`) calls that site's API, and a cookie for A is not sent to B.
+The old answer would have been `Access-Control-Allow-Credentials` with a cross-origin cookie;
+third-party cookie restrictions in current browsers make that genuinely unreliable, not merely
+discouraged.
+
+So: **token exchange, not a second sign-in.**
+
+1. The user signs in once, at the site serving the shell. That produces the ordinary cookie session
+   above.
+2. When the runtime first needs namespace `b`, it asks its *own* origin — not B —
+   `POST /api/auth/namespace-token { namespace: 'b' }`, over the existing cookie session.
+3. A's server mints a short-lived, audience-scoped token for B: signed, `aud: b`, minutes not days,
+   carrying the user's identity and nothing else.
+4. The runtime attaches it as `Authorization: Bearer` on calls to B, per namespace, and refreshes it
+   when it expires.
+
+Why this shape:
+
+- **The credential never crosses an origin as a cookie**, so nothing depends on third-party cookie
+  policy — which is the whole reason the naive version fails.
+- **`aud` is enforced.** A token for `b` is rejected by `c`. A compromised remote gets a token it
+  can only spend where it was already allowed to.
+- **Short-lived and revocable at the source.** The exchange endpoint checks the session record on
+  every mint, so revoking the session kills every downstream token within one expiry window.
+- **B stays in control.** B decides whether it trusts A as an issuer and what a user from A may do.
+  Federation is already an explicit allowlist on both sides; this is the same trust decision
+  expressed as a key.
+- **The user signs in once.** Which is the actual requirement.
+
+The realistic deployment is one operator's own properties — a console, a client site, a storefront —
+so A and B share an operator and key distribution is an internal matter, not a public federation
+protocol. This is deliberately *not* a general SSO product: no OIDC dance, no consent screens, no
+third-party issuers. If a genuinely third-party consumer ever appears, that is the point at which
+real OIDC earns its complexity, and it can be added under the same seam.
+
+**Deferred honestly:** token signing and key rotation are not built in Phase 1. Same-origin cookie
+sessions are, and they cover every consumer that exists today. The exchange endpoint lands with the
+first real federated deployment, and the shape above is what it will be.
+
 ## System callers
 
 Some backend work legitimately acts as the service itself, not as a user — a cron sweep, a reconciler, a pipeline stage writing storage. The PaaS codebase has this gap on record today: `email/receive` fabricates storage refs and discards real bytes because `s3.object_put` requires an end-user bearer token and no first-party caller pattern exists (`spec/roadmap/future.md` B3), and it is flagged there as likely to recur elsewhere.

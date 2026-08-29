@@ -93,7 +93,7 @@ Talking to another origin's REST API needs CORS done properly, and this is where
 - The remote allows the consuming origin explicitly. A **named list, never `*`** — consumers are declared in manifests, so the list is always known.
 - `Access-Control-Allow-Credentials: true` with credentialed requests, if sessions are cookie-based across origins.
 - Preflight caching (`Access-Control-Max-Age`) so `OPTIONS` is not paid per request.
-- Third-party cookie restrictions in modern browsers make cross-origin cookie sessions genuinely unreliable. **A token-based credential per namespace is the realistic answer** for cross-origin, with cookies remaining correct for same-origin. Exactly how a user's session on A becomes a credential for B is an open question (`roadmap.md`) and must be settled before the first real federated deployment — not improvised at build time.
+- Third-party cookie restrictions in modern browsers make cross-origin cookie sessions genuinely unreliable, so **each namespace carries its own token credential**, with cookies remaining correct same-origin. How a session on A becomes a credential for B is **settled**: A's own server exchanges the user's session for a short-lived, `aud`-scoped token for B, which the runtime sends as `Authorization: Bearer` per namespace. The user signs in once; no app logs in on its own. Full reasoning in `02-auth-and-session.md` ("One sign-in, across origins").
 
 ## Federation: loading apps from another site
 
