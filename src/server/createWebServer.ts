@@ -3,7 +3,7 @@ import { toolKey, type IMeshApp, type IServiceBroker, type ServiceModule } from 
 import type { ExposeEntry } from '../exposure/types.js';
 import { WebServiceModule } from '../exposure/WebServiceModule.js';
 import { mountRest } from '../exposure/rest.js';
-import type { SessionStore, SessionUser } from '../auth/types.js';
+import type { SessionStore, SessionUser, AuthorizeHook } from '../auth/types.js';
 import { MemorySessionStore } from '../auth/MemorySessionStore.js';
 import { readSessionId, type CookieOptions } from '../auth/session.js';
 import { mountAuthRoutes } from './authRoutes.js';
@@ -14,6 +14,7 @@ export interface CreateWebServerOptions {
     readonly modules: readonly ServiceModule[];
     readonly sessionStore?: SessionStore;
     readonly authenticate?: (credentials: Record<string, unknown>) => Promise<SessionUser | null>;
+    readonly authorize?: AuthorizeHook;
     readonly cookie?: Partial<CookieOptions>;
     readonly basePath?: string;
 }
@@ -28,11 +29,12 @@ export interface CreateWebServerResult {
  *
  * Scans the provided WebServiceModules for declared web configurations, validates that
  * no duplicate tool keys are exposed across modules, resolves sessions onto requests,
- * and mounts the resulting API endpoints under `basePath`.
+ * composes module and server authorization hooks, and mounts the resulting API endpoints under `basePath`.
  */
 export function createWebServer(options: CreateWebServerOptions): CreateWebServerResult {
     const exposed: ExposeEntry[] = [];
     const seenToolKeys = new Map<string, string>();
+    const moduleAuthorizers = new Map<string, AuthorizeHook>();
 
     for (const module of options.modules) {
         if (module instanceof WebServiceModule) {
@@ -46,6 +48,9 @@ export function createWebServer(options: CreateWebServerOptions): CreateWebServe
                     }
                     seenToolKeys.set(key, module.domain);
                     exposed.push(entry);
+                    if (config.authorize) {
+                        moduleAuthorizers.set(key, config.authorize);
+                    }
                 }
             }
         }
@@ -86,10 +91,26 @@ export function createWebServer(options: CreateWebServerOptions): CreateWebServe
         logger: broker.logger,
     });
 
+    // Build composite authorizer: module authorizer takes precedence for its own contracts, falling back to server authorizer
+    const compositeAuthorize: AuthorizeHook | undefined = (moduleAuthorizers.size > 0 || options.authorize !== undefined)
+        ? async (input) => {
+            const key = toolKey(input.contract);
+            const moduleAuth = moduleAuthorizers.get(key);
+            if (moduleAuth) {
+                return moduleAuth(input);
+            }
+            if (options.authorize) {
+                return options.authorize(input);
+            }
+            return true;
+        }
+        : undefined;
+
     // Mount contract REST endpoints
     mountRest(apiRouter, {
         broker,
         expose: exposed,
+        authorize: compositeAuthorize,
     });
 
     // Mount under basePath (default /api)

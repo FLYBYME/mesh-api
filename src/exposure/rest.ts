@@ -5,9 +5,9 @@ import type { ExposureBroker } from './broker.js';
 import type { ExposeEntry } from './types.js';
 import { coerceToSchema, formatZodError } from './input.js';
 import { toHttpError } from './errors.js';
-import { checkAuth } from '../auth/gate.js';
+import { executeGate, validateExposeEntry } from '../auth/gate.js';
 import { CSRF_HEADER, csrfTokenMatches } from '../auth/session.js';
-import type { SessionRecord } from '../auth/types.js';
+import type { SessionRecord, AuthorizeHook } from '../auth/types.js';
 
 declare global {
     namespace Express {
@@ -20,6 +20,7 @@ declare global {
 export interface MountRestOptions {
     readonly broker: ExposureBroker;
     readonly expose: readonly ExposeEntry[];
+    readonly authorize?: AuthorizeHook;
 }
 
 /**
@@ -32,6 +33,7 @@ export function mountRest(router: Router, options: MountRestOptions): void {
     const registeredRoutes = new Map<string, string>();
 
     for (const entry of options.expose) {
+        validateExposeEntry(entry);
         const contract = entry.contract;
         const key = toolKey(contract);
         const method = contract.rest.method.toUpperCase();
@@ -52,10 +54,17 @@ export function mountRest(router: Router, options: MountRestOptions): void {
             res.setHeader('x-correlation-id', correlationId);
 
             try {
-                // 1. Coarse exposure gate check before any processing or call
-                checkAuth(entry.auth, req.session);
+                // 1. Merge path params, query string, and body into a single raw input object
+                const rawInput: Record<string, unknown> = {
+                    ...req.params,
+                    ...req.query,
+                    ...(req.body && typeof req.body === 'object' && req.body !== null ? req.body : {}),
+                };
 
-                // 2. Anti-CSRF verification on state-changing requests when a session exists
+                // 2. Exposure gate & permission resolution check before any processing or call
+                const gateResult = await executeGate(entry, req.session, rawInput, options.authorize);
+
+                // 3. Anti-CSRF verification on state-changing requests when a session exists
                 const isStateChanging = contract.rest.method !== 'GET' || Boolean(contract.destructive);
                 if (isStateChanging && req.session) {
                     const csrfHeader = req.headers[CSRF_HEADER];
@@ -70,13 +79,7 @@ export function mountRest(router: Router, options: MountRestOptions): void {
                 }
                 // A public route with no session has no CSRF token to check against, so CSRF verification is skipped here.
 
-                // 3. Merge path params, query string, and body into a single input object
-                const rawInput: Record<string, unknown> = {
-                    ...req.params,
-                    ...req.query,
-                    ...(req.body && typeof req.body === 'object' ? req.body : {}),
-                };
-
+                // 4. Coerce and validate input against contract inputSchema
                 const coerced = coerceToSchema(contract.inputSchema, rawInput);
                 const parsed = contract.inputSchema.safeParse(coerced);
                 if (!parsed.success) {
@@ -87,11 +90,22 @@ export function mountRest(router: Router, options: MountRestOptions): void {
                     });
                 }
 
-                // 4. Populate call metadata -- unauthenticated calls carry no meta.user (spec/02)
+                // 5. Populate call metadata -- unauthenticated calls carry no meta.user (spec/02)
+                // Injects the gate's resolved scope into meta.user.tenant_id so a caller-supplied org
+                // in the request body cannot override the server-verified organization.
                 const user = req.session?.user;
-                const meta = {
+                const effectiveTenantId = gateResult.resolvedScope ?? user?.tenant_id;
+                const meta: Record<string, unknown> = {
                     correlationId,
-                    ...(user ? { user: { id: user.id, tenant_id: user.tenant_id, ...(user.roles ? { roles: [...user.roles] } : {}) } } : {}),
+                    ...(user ? {
+                        user: {
+                            ...user,
+                            id: user.id,
+                            tenant_id: effectiveTenantId ?? user.tenant_id,
+                            ...(user.roles ? { roles: [...user.roles] } : {}),
+                        },
+                    } : {}),
+                    ...(gateResult.extraMeta ?? {}),
                 };
 
                 const result = await options.broker.call(

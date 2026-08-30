@@ -10,14 +10,30 @@
 // rather than by intention: a headless service pays nothing for a UI it never serves, and the
 // browser half never pulls in express.
 // Exposure & Module Extension
-export type { AuthLevel, ExposeEntry, EventExposeEntry, WebConfig } from './exposure/types.js';
+export type {
+    AuthLevel,
+    AuthExposeEntry,
+    PermissionExposeEntry,
+    ExposeEntry,
+    EventExposeEntry,
+    WebConfig,
+} from './exposure/types.js';
 export { WebServiceModule } from './exposure/WebServiceModule.js';
 export { mountRest, type MountRestOptions } from './exposure/rest.js';
 export { toHttpError, type HttpErrorBody } from './exposure/errors.js';
 export { coerceToSchema, objectShapeOf, formatZodError } from './exposure/input.js';
 
 // Authentication & Session
-export type { SessionUser, SessionRecord, SessionStore } from './auth/types.js';
+export type {
+    SessionUser,
+    SessionRecord,
+    SessionStore,
+    AuthorizeInput,
+    AuthorizeSuccess,
+    AuthorizeFailure,
+    AuthorizeResult,
+    AuthorizeHook,
+} from './auth/types.js';
 export { MemorySessionStore } from './auth/MemorySessionStore.js';
 export {
     SESSION_COOKIE,
@@ -28,7 +44,15 @@ export {
     readSessionId,
     csrfTokenMatches,
 } from './auth/session.js';
-export { ADMIN_ROLE, checkAuth } from './auth/gate.js';
+export {
+    ADMIN_ROLE,
+    checkAuth,
+    matchPermission,
+    extractRequestedScope,
+    validateExposeEntry,
+    executeGate,
+    type GateExecutionResult,
+} from './auth/gate.js';
 
 // MCP & OpenAPI projections
 export {

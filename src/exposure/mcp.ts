@@ -4,8 +4,8 @@ import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { toolKey } from '@flybyme/mesh';
 import type { ExposeEntry } from './types.js';
 import { objectShapeOf } from './input.js';
-import { checkAuth } from '../auth/gate.js';
-import type { SessionRecord } from '../auth/types.js';
+import { executeGate, validateExposeEntry } from '../auth/gate.js';
+import type { SessionRecord, AuthorizeHook } from '../auth/types.js';
 
 /**
  * Metadata describing the MCP server implementation.
@@ -31,6 +31,10 @@ export interface McpServerOptions {
      * passed here to enforce the same checkAuth gate as REST.
      */
     readonly session?: SessionRecord | McpSessionAccessor;
+    /**
+     * Optional authorization hook for fine-grained permission resolution.
+     */
+    readonly authorize?: AuthorizeHook;
 }
 
 /**
@@ -50,6 +54,7 @@ export function buildMcpServer(
     const server = new McpServer(info);
 
     for (const entry of exposed) {
+        validateExposeEntry(entry);
         const { contract } = entry;
         const toolName = toolKey(contract);
 
@@ -77,11 +82,20 @@ export function buildMcpServer(
                     ? await options.session(extra)
                     : options?.session;
 
-                checkAuth(entry.auth, session);
+                const gateResult = await executeGate(entry, session, args, options?.authorize);
 
                 const user = session?.user;
+                const effectiveTenantId = gateResult.resolvedScope ?? user?.tenant_id;
                 const meta = {
-                    ...(user ? { user: { id: user.id, tenant_id: user.tenant_id, ...(user.roles ? { roles: [...user.roles] } : {}) } } : {}),
+                    ...(user ? {
+                        user: {
+                            ...user,
+                            id: user.id,
+                            tenant_id: effectiveTenantId ?? user.tenant_id,
+                            ...(user.roles ? { roles: [...user.roles] } : {}),
+                        },
+                    } : {}),
+                    ...(gateResult.extraMeta ?? {}),
                 };
                 const result = await broker.call(toolName, args, { meta });
 

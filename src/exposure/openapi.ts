@@ -174,7 +174,11 @@ export function buildOpenApiDocument(
             },
         };
 
-        if (entry.auth === 'user' || entry.auth === 'admin') {
+        const isPublic = 'auth' in entry && entry.auth === 'public';
+        const requiresAuth = !isPublic;
+        const isForbiddenPossible = ('auth' in entry && entry.auth === 'admin') || ('permission' in entry && Boolean(entry.permission));
+
+        if (requiresAuth) {
             responses['401'] = {
                 description: 'Authentication required',
                 content: {
@@ -185,7 +189,7 @@ export function buildOpenApiDocument(
             };
         }
 
-        if (entry.auth === 'admin') {
+        if (isForbiddenPossible) {
             responses['403'] = {
                 description: 'Forbidden',
                 content: {
@@ -212,7 +216,7 @@ export function buildOpenApiDocument(
             description: contract.description,
             tags: [contract.domain],
             ...(contract.destructive !== undefined ? { 'x-destructive': contract.destructive } : {}),
-            security: entry.auth === 'public' ? [] : [{ sessionAuth: [] }],
+            security: isPublic ? [] : [{ sessionAuth: [] }],
             ...(parameters.length > 0 ? { parameters } : {}),
             ...(requestBody ? { requestBody } : {}),
             responses,

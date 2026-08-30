@@ -1,4 +1,5 @@
 import type { ToolContract, z } from '@flybyme/mesh';
+import type { AuthorizeHook } from '../auth/types.js';
 
 /**
  * AuthLevel: the coarse gate applied at the public boundary.
@@ -10,15 +11,37 @@ import type { ToolContract, z } from '@flybyme/mesh';
 export type AuthLevel = 'public' | 'user' | 'admin';
 
 /**
- * ExposeEntry: one contract made reachable from outside the mesh.
+ * AuthExposeEntry: one contract made reachable from outside the mesh with a coarse auth gate.
  *
  * `auth` has no default. Making the author type `'public'` deliberately is the point -- an
  * omitted gate must never quietly mean "open".
  */
-export interface ExposeEntry {
+export interface AuthExposeEntry {
     readonly contract: ToolContract<z.ZodTypeAny, z.ZodTypeAny>;
     readonly auth: AuthLevel;
+    readonly permission?: never;
 }
+
+/**
+ * PermissionExposeEntry: one contract made reachable from outside the mesh with a fine-grained permission requirement.
+ *
+ * The permission key (e.g. 'dns.write') is evaluated by the application-supplied `authorize` hook
+ * within the caller's target scope (e.g. organization).
+ */
+export interface PermissionExposeEntry {
+    readonly contract: ToolContract<z.ZodTypeAny, z.ZodTypeAny>;
+    readonly permission: string;
+    readonly auth?: never;
+}
+
+/**
+ * ExposeEntry: one contract made reachable from outside the mesh.
+ *
+ * Must declare either coarse `auth` ('public' | 'user' | 'admin') or a fine-grained `permission`
+ * (e.g. 'dns.write'). An entry with neither is a compile-time and runtime error: an unguarded
+ * contract must remain unrepresentable.
+ */
+export type ExposeEntry = AuthExposeEntry | PermissionExposeEntry;
 
 /**
  * EventExposeEntry: one mesh event bridged to browsers over SSE.
@@ -40,4 +63,8 @@ export interface WebConfig {
     readonly events?: readonly EventExposeEntry[];
     /** Manifest path for the UI runtime. Unused until the runtime phases land. */
     readonly manifest?: string;
+    /**
+     * Application-supplied authorization hook that resolves permissions within scopes.
+     */
+    readonly authorize?: AuthorizeHook;
 }

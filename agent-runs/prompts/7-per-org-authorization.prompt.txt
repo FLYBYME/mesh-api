@@ -1,0 +1,110 @@
+You are working in /home/ubuntu/code/mesh-api. Read the spec first — it is the authority:
+
+  spec/02-auth-and-session.md   ("Multi-tenancy: mesh-api is the public boundary, so it owns org scoping")
+  spec/01-exposure.md           (the exposure policy this extends)
+  spec/00-overview.md           (why this package exists at all)
+
+## Why this is urgent
+
+`mesh-api` has replaced `platform/api-edge` as the PaaS platform's HTTP entrance, and **api-edge is
+being deleted right now**. It holds the only working implementation of per-organization
+authorization in that codebase. When it goes, this package is the only place that logic can live —
+and until it lands here, the platform's public boundary is weaker than the thing it replaced.
+
+**Read the real implementation before designing anything**, while it still exists:
+
+  /home/ubuntu/code/paas/src/platform/api-edge/api-edge.auth.ts
+
+Lines ~194–232 are the substance. What it does, and what must survive:
+
+1. Verifies a credential, yielding a `principal` and the credential's own `orgId`.
+2. If the request names a **different** org, refuses unless the caller is an operator. A member of
+   org A passing `orgId: B` is rejected, not served.
+3. Resolves that principal's **effective permissions within that specific org** — permissions are
+   per-org, not global — and glob-matches them against a permission key declared per exposed
+   contract.
+4. Injects the resolved org into the call, so a caller-supplied one is never trusted.
+
+Point 3 is why this cannot be expressed with the current `auth: 'public' | 'user' | 'admin'` enum: a
+closed set of three levels cannot say `dns.write` *in the org that owns this zone*.
+
+## What to build
+
+### 1. `ExposeEntry` carries a permission, not just a level
+
+```ts
+mountWeb({
+  expose: [
+    { contract: dnsRecordCreateContract, permission: 'dns.write' },
+    { contract: plansListContract,       auth: 'public' },
+  ],
+});
+```
+
+Keep `auth: 'public'` meaningful — genuinely unauthenticated endpoints still need to be declarable,
+and making the author type it deliberately is the point (`spec/01`). Decide how `permission` and
+`auth` coexist and justify it; do not silently allow an entry with neither, since an unguarded
+contract must remain unrepresentable.
+
+### 2. Authorization resolution is an application-supplied hook
+
+**`mesh-api` must not learn what an organization is.** A weather microservice has none, and baking
+a tenancy model into this package would make it PaaS infrastructure rather than a general one —
+the exact failure `00-overview.md` warns against.
+
+So the framework owns the boundary and the sequencing; the application owns the meaning:
+
+```ts
+mountWeb({
+  expose: [...],
+  authorize: async (input) => { /* app decides */ },
+});
+```
+
+Design the hook's input and output yourself, from what the four steps above actually require, and
+justify the shape. It must be able to express: who the principal is, what scope was requested, what
+permission the contract requires, and a decision that distinguishes *denied* from *no such scope*
+from *not authenticated* — those are different HTTP statuses and collapsing them leaks information
+about what exists.
+
+A service supplying no hook gets the simple existing behaviour. That path must keep working.
+
+### 3. Wire it into the request path
+
+The gate runs in the middleware that already resolves the session (`src/server/createWebServer.ts`,
+`src/exposure/rest.ts`), **before** any `broker.call`, exactly where `checkAuth` runs today. The
+resolved scope must reach the handler through call metadata rather than through the request body.
+
+## Rules
+
+- **Do not `git commit`.** Leave the work in the working tree.
+- **Zero `as any` / `as unknown as` / `as never`.** Absolute here. Note the source you are porting
+  from has several (`broker.call('roleAssignment.find' as any, ...)`) — they exist because that
+  codebase's generated registry was not available at that call site. Do not carry them across.
+- No new dependencies.
+- `npm run typecheck` (covers `src` AND `test` — plain `tsc` skips the tests) and `npx vitest run`
+  must pass, with **all existing tests still green**.
+- Comments explain *why*. House style: `src/exposure/broker.ts`, `src/runtime/reactivity/effect.ts`.
+
+## Verification
+
+Real broker, real HTTP, no mocks — follow `test/rest.test.ts`.
+
+The cases that matter:
+  - a caller scoped to org A requesting org B is **refused**, and an operator doing the same is
+    **allowed**
+  - a principal without the contract's required permission in that org is refused, and the same
+    principal *with* it in that org is allowed — proving resolution is per-org, not global
+  - the resolved org reaches the handler via meta, and a caller-supplied `orgId` in the body cannot
+    override it. **This is the most important test**: it is the one that stops a tenant reading
+    another tenant's data by editing a request.
+  - a service supplying no `authorize` hook behaves exactly as before
+  - denied / no-such-scope / unauthenticated produce distinct, correct statuses
+
+## Finish by printing
+
+  1. Each file created or changed, one line each.
+  2. The `authorize` hook's signature, and why that shape.
+  3. How `permission` and `auth` coexist on an expose entry, and how an entry with neither is
+     prevented.
+  4. Anything in `api-edge.auth.ts` you could not port, and why.
