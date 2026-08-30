@@ -8,6 +8,7 @@ import { AppStateContainerImpl } from './state.js';
 import { AppContextImpl } from './context.js';
 import type { Compositor } from './compositor.js';
 import { assertNoAppLeaks } from './leak.js';
+import type { ScopedRouter } from '../router/types.js';
 
 /**
  * AppInstance: manages the runtime lifecycle, scope, and surfaces of a single App.
@@ -15,24 +16,26 @@ import { assertNoAppLeaks } from './leak.js';
  * Implements the state machine:
  * registered -> loaded -> foreground <-> background -> unloaded
  */
-export class AppInstance {
-    readonly definition: AppDefinition;
+export class AppInstance<TApi = unknown> {
+    readonly definition: AppDefinition<TApi>;
     readonly scope: ReactiveScope;
     readonly state: AppStateContainerImpl;
-    readonly ctx: AppContextImpl;
+    readonly ctx: AppContextImpl<TApi>;
     private readonly compositor: Compositor;
     private readonly activeSurfaces: Array<{ dismiss(): void }> = [];
 
     constructor(
-        definition: AppDefinition,
+        definition: AppDefinition<TApi>,
         compositor: Compositor,
-        storage?: Storage
+        storage?: Storage,
+        router?: ScopedRouter,
+        api?: TApi
     ) {
         this.definition = definition;
         this.compositor = compositor;
         this.scope = createScope();
         this.state = new AppStateContainerImpl(definition.id, this.scope, storage);
-        this.ctx = new AppContextImpl(definition.id, this.state, compositor);
+        this.ctx = new AppContextImpl<TApi>(definition.id, this.state, compositor, router, api);
     }
 
     get id(): string {

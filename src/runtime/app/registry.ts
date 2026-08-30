@@ -6,7 +6,7 @@ import type { AppDefinition } from './types.js';
  * Apps self-register on import via `defineApp()`, mirroring how `defineContract()`
  * registers contracts into the exposure broker.
  */
-const appRegistry = new Map<string, AppDefinition>();
+const appRegistry = new Map<string, AppDefinition<never>>();
 
 /**
  * Registers an App definition into the framework's module-level registry.
@@ -14,7 +14,7 @@ const appRegistry = new Map<string, AppDefinition>();
  * Enforces unique App ids across the entire runtime. Duplicate registration throws
  * immediately with an informative error naming both the existing and incoming apps.
  */
-export function defineApp(definition: AppDefinition): AppDefinition {
+export function defineApp<TApi = unknown>(definition: AppDefinition<TApi>): AppDefinition<TApi> {
     if (!definition.id || typeof definition.id !== 'string') {
         throw new Error('App definition must have a valid non-empty "id" string');
     }

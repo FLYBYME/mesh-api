@@ -7,6 +7,8 @@ import type {
 import { getRegisteredApp } from './registry.js';
 import { Compositor } from './compositor.js';
 import { AppInstance } from './instance.js';
+import type { ScopedRouter } from '../router/types.js';
+import type { TopLevelNavigationHost } from '../router/scoped.js';
 
 /**
  * AppHostImpl: coordinates App lifecycles, surface placement via the Compositor,
@@ -18,22 +20,58 @@ export class AppHostImpl implements AppHost {
     private readonly devMode: boolean;
     private readonly storage?: Storage;
     private readonly compositor: Compositor;
-    private readonly instances = new Map<string, AppInstance>();
+    private readonly instances = new Map<string, AppInstance<unknown>>();
     private foregroundAppId: string | null = null;
     private loadedOrder: string[] = [];
     private keydownHandler?: (e: KeyboardEvent) => void;
+    private routerOption?: TopLevelNavigationHost | ((appId: string) => ScopedRouter | undefined);
+    private apiOption?: unknown;
 
     constructor(options: AppHostOptions) {
         this.policy = options.policy;
         this.root = options.root;
         this.devMode = options.devMode ?? false;
         this.storage = options.storage;
+        this.routerOption = options.router;
+        this.apiOption = options.api;
         this.compositor = new Compositor({
             root: options.root,
             policy: options.policy,
         });
 
         this.setupTaskSwitcher();
+    }
+
+    setRouter(router: TopLevelNavigationHost | ((appId: string) => ScopedRouter | undefined)): void {
+        this.routerOption = router;
+    }
+
+    setApi(api: unknown): void {
+        this.apiOption = api;
+    }
+
+    private resolveRouterForApp(appId: string): ScopedRouter | undefined {
+        const r = this.routerOption;
+        if (!r) return undefined;
+        if (typeof r === 'function') {
+            return r(appId);
+        }
+        if (typeof r === 'object' && 'getAppRouter' in r && typeof r.getAppRouter === 'function') {
+            return r.getAppRouter(appId);
+        }
+        return undefined;
+    }
+
+    private isApiFactory(val: unknown): val is (appId: string) => unknown {
+        return typeof val === 'function';
+    }
+
+    private resolveApiForApp(appId: string): unknown {
+        const a = this.apiOption;
+        if (this.isApiFactory(a)) {
+            return a(appId);
+        }
+        return a;
     }
 
     private setupTaskSwitcher(): void {
@@ -78,7 +116,10 @@ export class AppHostImpl implements AppHost {
             throw new Error(`App "${id}" is not registered`);
         }
 
-        instance = new AppInstance(definition, this.compositor, this.storage);
+        const router = this.resolveRouterForApp(id);
+        const api = this.resolveApiForApp(id);
+
+        instance = new AppInstance(definition, this.compositor, this.storage, router, api);
         this.instances.set(id, instance);
         if (!this.loadedOrder.includes(id)) {
             this.loadedOrder.push(id);

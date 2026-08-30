@@ -7,6 +7,7 @@ import type {
 } from './types.js';
 import type { AppStateContainerImpl } from './state.js';
 import type { Compositor } from './compositor.js';
+import type { ScopedRouter } from '../router/types.js';
 
 /**
  * AppContextImpl: context instance provided to an App during its lifecycle.
@@ -14,19 +15,32 @@ import type { Compositor } from './compositor.js';
  * Implements the Wayland architectural constraint: an App can request surfaces from the
  * compositor, manage its own scoped state, and register cleanups, but possesses no API
  * allowing it to position itself or inspect foreign app state.
+ *
+ * Exposes scoped router and typed api client directly on the context, fulfilling the
+ * framework contract that an App receives everything it needs via its AppContext.
  */
-export class AppContextImpl implements AppContext {
+export class AppContextImpl<TApi = unknown> implements AppContext<TApi> {
     readonly appId: string;
     readonly state: AppStateContainerImpl;
     private _status: AppLifecycleState = 'registered';
     private readonly compositor: Compositor;
     private readonly cleanups: Array<() => void> = [];
     private readonly leakTrackers: Array<LeakableResource | (() => void)> = [];
+    readonly router?: ScopedRouter;
+    readonly api?: TApi;
 
-    constructor(appId: string, state: AppStateContainerImpl, compositor: Compositor) {
+    constructor(
+        appId: string,
+        state: AppStateContainerImpl,
+        compositor: Compositor,
+        router?: ScopedRouter,
+        api?: TApi
+    ) {
         this.appId = appId;
         this.state = state;
         this.compositor = compositor;
+        this.router = router;
+        this.api = api;
     }
 
     get status(): AppLifecycleState {

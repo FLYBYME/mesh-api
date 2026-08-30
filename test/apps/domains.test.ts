@@ -2,11 +2,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { flushSync, signal, type Signal } from '../../src/runtime/reactivity/index.js';
+import { flushSync, signal, createScope, type Signal } from '../../src/runtime/reactivity/index.js';
 import {
     clearAppRegistry,
     defineApp,
     createAppHost,
+    AppContextImpl,
+    AppStateContainerImpl,
+    Compositor,
     type LayoutPolicy,
     type AppContext,
 } from '../../src/runtime/app/index.js';
@@ -17,12 +20,12 @@ import {
     domainsApp,
     domainViews,
     createInMemoryApiClient,
-    setDomainApiClient,
-    createStandaloneDomainAppState,
-    createDomainsListView,
-    createDomainDetailView,
+    createDomainAppState,
+    DomainsListView,
+    DomainDetailView,
     type DomainRecord,
     type DnsRecordItem,
+    type DomainApiClient,
 } from '../../apps/domains.js';
 
 function makePolicy(root: HTMLElement, regions: Record<string, { roles: readonly ('page' | 'panel' | 'popup' | 'banner' | 'overlay' | 'background')[] }>): LayoutPolicy {
@@ -42,6 +45,7 @@ function createTestScopedRouter(initialPath = '/domains', initialParams: Record<
     const pathSig = signal<string>(initialPath);
 
     return {
+        appId: 'domains',
         navigate: async (p) => { pathSig.set(p); },
         replace: async (p) => { pathSig.set(p); },
         back: () => {},
@@ -118,6 +122,27 @@ describe('Domain Management App (apps/domains.ts)', () => {
         },
     ];
 
+    function createTestAppContext(options: {
+        router?: ScopedRouter;
+        api?: DomainApiClient;
+        appId?: string;
+    } = {}): AppContext<DomainApiClient> {
+        const appId = options.appId ?? 'domains';
+        const scope = createScope();
+        const state = new AppStateContainerImpl(appId, scope);
+        const compositor = new Compositor({
+            root: document.createElement('div'),
+            policy: { regions: {} },
+        });
+        return new AppContextImpl<DomainApiClient>(
+            appId,
+            state,
+            compositor,
+            options.router,
+            options.api ?? createInMemoryApiClient(sampleDomains, sampleDnsRecords)
+        );
+    }
+
     beforeEach(() => {
         clearAppRegistry();
         defineApp(domainsApp);
@@ -126,7 +151,6 @@ describe('Domain Management App (apps/domains.ts)', () => {
         document.body.appendChild(container);
         document.body.appendChild(root);
         window.history.replaceState(null, '', '/domains');
-        setDomainApiClient(createInMemoryApiClient(sampleDomains, sampleDnsRecords));
     });
 
     afterEach(() => {
@@ -136,20 +160,13 @@ describe('Domain Management App (apps/domains.ts)', () => {
 
     it('1. list renders real rows from a resource, and filtering updates table without recreating surviving rows (assert node identity)', async () => {
         const apiClient = createInMemoryApiClient(sampleDomains, sampleDnsRecords);
-        const state = createStandaloneDomainAppState(apiClient);
         const router = createTestScopedRouter('/domains');
+        const ctx = createTestAppContext({ router, api: apiClient });
+        const state = createDomainAppState(ctx);
 
         // Render ListView
-        const listViewFn = createDomainsListView(state, apiClient);
-        const viewEl = listViewFn({
-            params: router.params,
-            query: router.query,
-            router,
-        });
-
-        if (viewEl instanceof HTMLElement) {
-            container.appendChild(viewEl);
-        }
+        const viewEl = DomainsListView(ctx, state);
+        container.appendChild(viewEl);
 
         // Wait for async resource fetch to resolve and flush microtasks
         flushSync();
@@ -239,19 +256,14 @@ describe('Domain Management App (apps/domains.ts)', () => {
 
     it('3. navigation is real anchors — assert href exists, not a click handler', async () => {
         const apiClient = createInMemoryApiClient(sampleDomains, sampleDnsRecords);
-        const state = createStandaloneDomainAppState(apiClient);
         const router = createTestScopedRouter('/domains');
+        const ctx = createTestAppContext({ router, api: apiClient });
+        const state = createDomainAppState(ctx);
 
         // 1. List View Links
-        const listView = createDomainsListView(state, apiClient)({
-            params: router.params,
-            query: router.query,
-            router,
-        });
+        const listView = DomainsListView(ctx, state);
+        container.appendChild(listView);
 
-        if (listView instanceof HTMLElement) {
-            container.appendChild(listView);
-        }
         flushSync();
         await new Promise(resolve => setTimeout(resolve, 20));
         flushSync();
@@ -270,15 +282,11 @@ describe('Domain Management App (apps/domains.ts)', () => {
 
         // 2. Detail View Back Link
         const detailRouter = createTestScopedRouter('/domains/dom-1', { id: 'dom-1' });
-        const detailView = createDomainDetailView(state, apiClient)({
-            params: detailRouter.params,
-            query: detailRouter.query,
-            router: detailRouter,
-        });
+        const detailCtx = createTestAppContext({ router: detailRouter, api: apiClient });
+        const detailState = createDomainAppState(detailCtx);
+        const detailView = DomainDetailView(detailCtx, detailState);
+        container.appendChild(detailView);
 
-        if (detailView instanceof HTMLElement) {
-            container.appendChild(detailView);
-        }
         flushSync();
         await new Promise(resolve => setTimeout(resolve, 20));
         flushSync();
@@ -291,18 +299,13 @@ describe('Domain Management App (apps/domains.ts)', () => {
 
     it('4. the create form rejects invalid input using the contract\'s own schema', async () => {
         const apiClient = createInMemoryApiClient(sampleDomains, sampleDnsRecords);
-        const state = createStandaloneDomainAppState(apiClient);
         const router = createTestScopedRouter('/domains');
+        const ctx = createTestAppContext({ router, api: apiClient });
+        const state = createDomainAppState(ctx);
 
-        const listView = createDomainsListView(state, apiClient)({
-            params: router.params,
-            query: router.query,
-            router,
-        });
+        const listView = DomainsListView(ctx, state);
+        container.appendChild(listView);
 
-        if (listView instanceof HTMLElement) {
-            container.appendChild(listView);
-        }
         await Promise.resolve();
         flushSync();
 
@@ -365,7 +368,7 @@ describe('Domain Management App (apps/domains.ts)', () => {
         clearAppRegistry();
         const customDomainsApp = {
             ...domainsApp,
-            onLoad(ctx: AppContext) {
+            onLoad(ctx: AppContext<DomainApiClient>) {
                 testSig = ctx.state.signal(0);
                 ctx.state.effect(() => {
                     if (testSig) testSig();
@@ -422,13 +425,13 @@ describe('Domain Management App (apps/domains.ts)', () => {
 
     it('7. mountViews seamlessly switches between List and Detail views and preserves Detail DOM across param changes', async () => {
         const apiClient = createInMemoryApiClient(sampleDomains, sampleDnsRecords);
-        const state = createStandaloneDomainAppState(apiClient);
 
         const currentPathSig = signal<string>('/domains');
         const paramsSig = signal<Record<string, string>>({});
         const querySig = signal<URLSearchParams>(new URLSearchParams());
 
         const testRouter: ScopedRouter = {
+            appId: 'domains',
             navigate: async (p) => {
                 currentPathSig.set(p);
                 const parts = p.split('/').filter(Boolean);
@@ -456,7 +459,11 @@ describe('Domain Management App (apps/domains.ts)', () => {
             queryParam: (_name, defaultValue = '') => signal(defaultValue),
         };
 
-        const cleanupViews = mountViews(container, domainViews, testRouter);
+        const ctx = createTestAppContext({ router: testRouter, api: apiClient });
+        const state = createDomainAppState(ctx);
+        const views = domainViews(ctx, state);
+
+        const cleanupViews = mountViews(container, views, testRouter);
 
         // 1. Initial path: /domains -> renders List View
         flushSync();

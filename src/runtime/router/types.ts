@@ -17,6 +17,7 @@ export type RouteParams = Record<string, string>;
  * and the scoped router automatically prefixes it to `/b/shop/card/1` without the app knowing.
  */
 export interface ScopedRouter {
+    readonly appId: string;
     navigate(path: string, options?: { replace?: boolean }): Promise<void>;
     replace(path: string): Promise<void>;
     back(): void;

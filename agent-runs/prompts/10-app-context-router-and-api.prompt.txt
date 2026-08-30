@@ -1,0 +1,95 @@
+You are working in /home/ubuntu/code/mesh-api.
+
+## The assignment
+
+Put `router` and `api` on `AppContext`. This is the framework's central promise — an app receives
+its context and everything it needs is on it — and it is currently unmet.
+
+Read first:
+  spec/07-routing.md          (`ctx.router.navigate/params/query/queryParam`)
+  spec/08-data.md             (`ctx.api`, and how an App talks to the backend)
+  spec/11-example-kanban.md   (both used together in a worked example)
+  spec/03-runtime-model.md    (App, Surface, Role, compositor)
+  src/runtime/app/types.ts    (`AppContext`, lines ~118-128 — what actually exists)
+  src/runtime/app/context.ts  (the implementation, and what it is constructed with)
+  src/runtime/router/scoped.ts (`ScopedRouterImpl` — already exists, already prefix-transparent)
+
+## Why
+
+`AppContext` today exposes only `appId`, `state`, `status`, `requestSurface`, `registerCleanup`,
+`trackLeakable`. Specs 07, 08 and 11 all state every app receives a router and an API client.
+
+The first real consumer (`apps/domains.ts`, dispatch #9) had to take both in through factory
+functions instead — `mountViews`-style plumbing threaded manually through every view. It works, and
+it is a workaround. Every app built after this one inherits it if it is not fixed now, and the
+workaround is contagious in the worst way: it looks like a reasonable convention rather than a gap.
+
+## What to build
+
+### 1. `ctx.router`
+
+A `ScopedRouter` for the app. `ScopedRouterImpl` already exists and already handles prefix
+transparency, so this is wiring, not new routing. Decide honestly where it comes from — the app
+host, the compositor, or an explicit argument to the context constructor — and say which and why.
+
+An app running without a router (a unit test constructing a bare context, say) must degrade in a
+defined way rather than throwing an unhelpful `undefined is not a function` at the first navigate.
+State the shape you chose: an optional property that consumers must narrow, or a null-object router
+that records navigations. Optional-and-narrowed is usually more honest; a null object that silently
+swallows `navigate()` hides a real misconfiguration. Pick one, justify it in a comment.
+
+### 2. `ctx.api`
+
+The typed client from `src/cli/generate-client.ts`'s model, scoped to what the app may call.
+
+**Do not invent a second client.** Read what the generator actually emits before designing the
+type. If a runtime-side client shape does not exist yet, the honest deliverable is the seam: a
+typed `ctx.api` whose type comes from the generated client, injected by the host, with the
+generation and the injection kept separate. Say clearly in your summary what is real and what is a
+seam awaiting Phase 5.
+
+`ctx.api.events.on(...)` (spec 08, spec 11) is **out of scope** — there is no SSE client, that is
+Phase 5, and it is roadmap finding #8. Do not stub it into existence. If your `api` type would
+imply it exists, leave it off and note the divergence.
+
+### 3. Retrofit `apps/domains.ts`
+
+Remove the factory-function plumbing and take both off `ctx`. The app getting *shorter* is the
+proof this worked. If it does not get shorter, something is wrong with the design — say so.
+
+## Rules
+
+- **Do not `git commit`.** Leave the work in the working tree.
+- **Do not touch `src/runtime/dom/`.** A concurrent dispatch is working there. If you believe a DOM
+  change is required, stop and say so in your summary instead.
+- **Zero `as any` / `as unknown as` / `as never`.** Absolute in this codebase.
+- No new dependencies.
+- **DOM test files need `// @vitest-environment happy-dom` at the top.** Vitest 4 removed
+  `environmentMatchGlobs`; without the docblock a file silently has no `document`.
+- **Effects are microtask-scheduled** — a write followed immediately by a DOM assertion tests the
+  scheduler, not your code. Use `flushSync()`.
+- `npm run typecheck` (covers `src` AND `test`) and `npx vitest run` must pass, every existing test
+  still green.
+- Comments explain *why*. House style: `src/exposure/broker.ts`, `src/runtime/dom/h.ts`.
+
+## Verification
+
+The existing runtime suites *construct* contexts and never *consume* one the way an app does —
+which is exactly why all eight first-consumer findings escaped them. Write tests that consume:
+
+  - an app's `onLoad` receives a context on which `router` and `api` are present and usable
+  - `ctx.router` is scoped: an app mounted under a prefix navigates in its own coordinate space and
+    the resulting URL carries the prefix
+  - two concurrently-loaded apps get their own routers and do not share navigation state
+  - unloading an app disposes whatever the context holds — no listener outlives the app
+  - a context constructed without a router behaves as you documented, rather than crashing at first
+    use
+
+## Finish by printing
+
+  1. Each file created or changed, one line each.
+  2. Where the router comes from, and why that owner rather than the alternatives.
+  3. What `ctx.api` really is right now: how much is wired and how much is a typed seam.
+  4. The line-count change in `apps/domains.ts`, and what the retrofit deleted.
+  5. Anything in specs 03, 07, 08 or 11 that is wrong as written — reconcile the doc to reality
+     where reality was the deliberate decision, and say which way you went.

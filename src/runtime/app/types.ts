@@ -5,6 +5,8 @@ import type {
     DisposeFn,
     EffectFn,
 } from '../reactivity/types.js';
+import type { ScopedRouter } from '../router/types.js';
+import type { TopLevelNavigationHost } from '../router/scoped.js';
 
 /**
  * Closed set of surface roles.
@@ -68,11 +70,11 @@ export interface SurfaceRequest {
 /**
  * Static surface declaration on an App definition.
  */
-export interface SurfaceDefinition {
+export interface SurfaceDefinition<TApi = unknown> {
     readonly role: SurfaceRole;
     readonly slot?: string;
     readonly route?: string;
-    mount?(container: HTMLElement, ctx: AppContext): void | (() => void) | Promise<void | (() => void)>;
+    mount?(container: HTMLElement, ctx: AppContext<TApi>): void | (() => void) | Promise<void | (() => void)>;
 }
 
 /**
@@ -116,11 +118,33 @@ export interface LeakableResource {
  *
  * Structural constraint: there are no DOM positioning APIs, no target selectors,
  * and no layout region accessors on this object.
+ *
+ * Exposes scoped router and typed api client directly on the context, fulfilling the
+ * framework contract that an App receives everything it needs via its AppContext.
  */
-export interface AppContext {
+export interface AppContext<TApi = unknown> {
     readonly appId: string;
     readonly state: AppStateContainer;
     readonly status: AppLifecycleState;
+    /**
+     * Scoped router for the app, or undefined if the context was constructed without a router
+     * (e.g. in bare unit test harnesses).
+     *
+     * Designed as optional (`ScopedRouter | undefined`) rather than a silent null-object.
+     * A null-object router that silently swallows `navigate()` calls hides misconfigurations
+     * and broken navigation flows; forcing consumers or callers to acknowledge the optionality
+     * (or providing an explicit mock in tests) ensures missing routing infrastructure fails fast
+     * and visibly.
+     */
+    readonly router?: ScopedRouter;
+    /**
+     * Typed client scoped to what this app may call, or undefined if no client was injected.
+     *
+     * In Phase 4, this is a typed seam: the host injects an ApiClient (either generated via
+     * `generateClient` or provided by an in-memory/custom implementation). Phase 5 will bind
+     * this to the full network and SSE event bridge.
+     */
+    readonly api?: TApi;
     requestSurface(request: SurfaceRequest): Promise<SurfaceResult>;
     registerCleanup(cleanup: () => void): void;
     trackLeakable(resource: LeakableResource | (() => void)): void;
@@ -129,14 +153,14 @@ export interface AppContext {
 /**
  * Declaration of an App.
  */
-export interface AppDefinition {
+export interface AppDefinition<TApi = unknown> {
     readonly id: string;
     readonly title: string;
-    readonly surfaces?: readonly SurfaceDefinition[];
-    onLoad?(ctx: AppContext): void | Promise<void>;
-    onActivate?(ctx: AppContext): void | Promise<void>;
-    onDeactivate?(ctx: AppContext): void | Promise<void>;
-    onUnload?(ctx: AppContext): void | Promise<void>;
+    readonly surfaces?: readonly SurfaceDefinition<TApi>[];
+    onLoad?(ctx: AppContext<TApi>): void | Promise<void>;
+    onActivate?(ctx: AppContext<TApi>): void | Promise<void>;
+    onDeactivate?(ctx: AppContext<TApi>): void | Promise<void>;
+    onUnload?(ctx: AppContext<TApi>): void | Promise<void>;
 }
 
 /**
@@ -171,6 +195,8 @@ export interface AppHostOptions {
     readonly root: HTMLElement;
     readonly devMode?: boolean;
     readonly storage?: Storage;
+    readonly router?: TopLevelNavigationHost | ((appId: string) => ScopedRouter | undefined);
+    readonly api?: unknown;
 }
 
 /**
@@ -185,5 +211,7 @@ export interface AppHost {
     getAppState(id: string): AppLifecycleState | undefined;
     getForegroundAppId(): string | null;
     getLoadedAppIds(): readonly string[];
+    setRouter(router: TopLevelNavigationHost | ((appId: string) => ScopedRouter | undefined)): void;
+    setApi(api: unknown): void;
     dispose(): void;
 }

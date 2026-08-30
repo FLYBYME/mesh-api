@@ -74,6 +74,10 @@ export class Router implements TopLevelNavigationHost {
         // Setup History and Link Interceptor
         this.setupHistory();
 
+        if (this.host && 'setRouter' in this.host && typeof this.host.setRouter === 'function') {
+            this.host.setRouter(this);
+        }
+
         if (options.interceptLinks !== false && this.win) {
             this.cleanupLinkInterceptor = attachLinkInterceptor(
                 this.root ?? this.win.document,
@@ -352,10 +356,14 @@ export class Router implements TopLevelNavigationHost {
     getAppRouter(appId: string, options?: { namespace?: string; mountPrefix?: string }): ScopedRouter {
         let scoped = this.scopedRouters.get(appId);
         if (scoped === undefined) {
+            const routeDef = this.routes.find((r) => r.appId === appId);
+            const namespace = options?.namespace ?? routeDef?.namespace ?? this._currentNamespace.peek();
+            const mountPrefix = options?.mountPrefix ?? routeDef?.mountPrefix ?? this._currentMountPrefix.peek();
+
             scoped = new ScopedRouterImpl({
                 appId,
-                namespace: options?.namespace ?? this._currentNamespace.peek(),
-                mountPrefix: options?.mountPrefix ?? this._currentMountPrefix.peek(),
+                namespace,
+                mountPrefix,
                 params: this._params,
                 query: this._query,
                 currentPath: this._currentPath,
