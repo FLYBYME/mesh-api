@@ -72,12 +72,19 @@ Non-negotiable, and cheap here because the output is real HTML:
 
 Deliberately small. The framework ships primitives that page chrome and typical apps need; it does not ship a sixty-component catalogue up front.
 
-**Layout** — Stack, Row, Grid, Spacer, Divider.
-**Content** — Text, Heading, Icon, Badge, Avatar, Code.
-**Controls** — Button, Input, Textarea, Select, Checkbox, Radio, Switch, Form (with real validation from the same zod schemas the contracts use).
-**Structure** — Card, List, Table (virtualised for large sets), Tabs, Accordion, Tree.
-**Feedback** — Spinner, ProgressBar, Toast, EmptyState, ErrorState, Skeleton.
-**Overlay** — Modal, Drawer, Popover, ContextMenu, Tooltip, ConfirmDialog.
+**What ships today**, in `src/runtime/dom/components/`:
+
+**Layout** — Stack, Row.
+**Content** — Text, Heading, Badge.
+**Controls** — Button, Input, Form (with real validation from the same zod schemas the contracts use).
+**Structure** — Card, Table.
+**Feedback** — Spinner, EmptyState, ErrorState.
+
+Plus the control-flow helpers `For` and `When` from `src/runtime/dom/control.ts`, which are not components but are how structure changes.
+
+**Not built.** Listed because the shape is known, not because it is pending: Grid, Spacer, Divider, Icon, Avatar, Code, Textarea, Select, Checkbox, Radio, Switch, List, Tabs, Accordion, Tree, ProgressBar, Toast, Skeleton, Modal, Drawer, Popover, ContextMenu, Tooltip, ConfirmDialog. `Table` is also **not virtualised** — that is Phase 6, and needed only for large sets.
+
+An earlier version of this file listed the whole set as though it existed. That is the failure this section now avoids: a consumer reads the catalogue, writes `Select(...)`, and finds out at `tsc` time.
 
 Forms deserve a specific note: because contracts already carry `inputSchema`, a form can be generated from a contract with correct types, correct required/optional handling, and validation that matches the server exactly — because it *is* the server's schema. Client and server validation cannot drift, since there is only one schema.
 
