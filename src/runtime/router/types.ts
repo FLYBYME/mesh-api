@@ -1,5 +1,5 @@
 import type { ReadonlySignal, Signal } from '../reactivity/types.js';
-import type { AppHost } from '../app/types.js';
+import type { AppHost, AppContext } from '../app/types.js';
 import type { Manifest, ManifestAuthLevel } from '../manifest/types.js';
 import type { SessionUser } from '../../auth/types.js';
 import type { DOMChild } from '../dom/types.js';
@@ -31,20 +31,29 @@ export interface ScopedRouter {
 }
 
 /**
- * View component function signature.
+ * Properties passed to a ViewComponent.
  */
-export type ViewComponent = (props: {
+export interface ViewProps<TApi = unknown> {
     params: ReadonlySignal<RouteParams>;
     query: ReadonlySignal<URLSearchParams>;
     router: ScopedRouter;
-}) => HTMLElement | DOMChild;
+    ctx?: AppContext<TApi>;
+}
+
+/**
+ * View component function signature.
+ */
+export type ViewComponent<TApi = unknown> = (
+    props: ViewProps<TApi>,
+    ctx?: AppContext<TApi>
+) => HTMLElement | DOMChild;
 
 /**
  * Declaration of a View within an App's page surface.
  */
-export interface ViewDefinition {
+export interface ViewDefinition<TApi = unknown> {
     readonly path: string;
-    readonly view: ViewComponent;
+    view(props: ViewProps<TApi>, ctx?: AppContext<TApi>): HTMLElement | DOMChild;
 }
 
 /**

@@ -6,7 +6,7 @@ import type { AppDefinition } from './types.js';
  * Apps self-register on import via `defineApp()`, mirroring how `defineContract()`
  * registers contracts into the exposure broker.
  */
-const appRegistry = new Map<string, AppDefinition<never>>();
+const appRegistry = new Map<string, AppDefinition<unknown>>();
 
 /**
  * Registers an App definition into the framework's module-level registry.

@@ -6,15 +6,17 @@ import { computed } from '../../reactivity/computed.js';
 import { h } from '../h.js';
 import { For } from '../control.js';
 
-export interface TableColumn<T> {
-    readonly key: keyof T | string;
-    readonly label?: string | (() => string);
-    readonly render?: (value: unknown, row: T, index: () => number) => DOMChild;
-    readonly sortable?: boolean;
-    readonly sortFn?: (a: T, b: T) => number;
-    readonly class?: string | (() => string);
-    readonly headerClass?: string | (() => string);
-}
+export type TableColumn<T> = {
+    [K in keyof T & string]: {
+        readonly key: K;
+        readonly label?: string | (() => string);
+        readonly render?: (value: T[K], row: T, index: () => number) => DOMChild;
+        readonly sortable?: boolean;
+        readonly sortFn?: (a: T, b: T) => number;
+        readonly class?: string | (() => string);
+        readonly headerClass?: string | (() => string);
+    };
+}[keyof T & string];
 
 export type TableColumnProp<T> = TableColumn<T> | (keyof T & string) | string;
 
@@ -27,7 +29,7 @@ export interface TableProps<T> {
         | Resource<T[]>
         | readonly T[];
     readonly columns?: readonly TableColumnProp<T>[];
-    readonly key: keyof T | ((row: T) => string | number);
+    readonly key: (keyof T & string) | ((row: T) => string | number);
     readonly class?: string | (() => string);
     readonly sortable?: boolean;
     readonly ref?: (el: HTMLTableElement) => void;
@@ -49,6 +51,16 @@ function formatHeader(key: string): string {
         .filter(Boolean)
         .map(part => part.charAt(0).toUpperCase() + part.slice(1))
         .join(' ');
+}
+
+interface InternalColumn<T> {
+    readonly key: string;
+    readonly label: string | (() => string);
+    readonly sortable?: boolean;
+    readonly sortFn?: (a: T, b: T) => number;
+    readonly class?: string | (() => string);
+    readonly headerClass?: string | (() => string);
+    readonly renderCell: (row: T, index: () => number) => DOMChild;
 }
 
 /**
@@ -79,23 +91,45 @@ export function Table<T>(props: TableProps<T>): HTMLTableElement {
         return [];
     };
 
-    const normalizedColumns = computed<TableColumn<T>[]>(() => {
+    const normalizedColumns = computed<InternalColumn<T>[]>(() => {
         if (props.columns && props.columns.length > 0) {
-            return props.columns.map(col => {
+            return props.columns.map((col): InternalColumn<T> => {
                 if (typeof col === 'string') {
+                    const colKey = col;
                     return {
-                        key: col,
-                        label: formatHeader(col),
+                        key: colKey,
+                        label: formatHeader(colKey),
+                        renderCell: (row: T) => {
+                            if (!isRecord(row)) return '';
+                            const raw = row[colKey];
+                            const val = typeof raw === 'function' ? raw() : raw;
+                            return val == null ? '' : String(val);
+                        },
                     };
                 }
+
+                const colKey = col.key;
+                const label = col.label ?? formatHeader(colKey);
+                const renderFn = col.render;
+
                 return {
-                    key: col.key,
-                    label: col.label ?? formatHeader(String(col.key)),
-                    render: col.render,
+                    key: colKey,
+                    label,
                     sortable: col.sortable,
                     sortFn: col.sortFn,
                     class: col.class,
                     headerClass: col.headerClass,
+                    renderCell: renderFn
+                        ? (row: T, index: () => number) => {
+                              const val = row[col.key];
+                              return renderFn(val, row, index);
+                          }
+                        : (row: T) => {
+                              if (!isRecord(row)) return '';
+                              const raw = row[colKey];
+                              const val = typeof raw === 'function' ? raw() : raw;
+                              return val == null ? '' : String(val);
+                          },
                 };
             });
         }
@@ -105,13 +139,19 @@ export function Table<T>(props: TableProps<T>): HTMLTableElement {
         const first = list[0];
         if (!isRecord(first)) return [];
 
-        return Object.keys(first).map(k => ({
+        return Object.keys(first).map((k): InternalColumn<T> => ({
             key: k,
             label: formatHeader(k),
+            renderCell: (row: T) => {
+                if (!isRecord(row)) return '';
+                const raw = row[k];
+                const val = typeof raw === 'function' ? raw() : raw;
+                return val == null ? '' : String(val);
+            },
         }));
     });
 
-    const handleSortClick = (colKey: string, col: TableColumn<T>) => {
+    const handleSortClick = (colKey: string, col: InternalColumn<T>) => {
         if (props.sortable === false || col.sortable === false) return;
 
         if (sortColumn() === colKey) {
@@ -133,7 +173,7 @@ export function Table<T>(props: TableProps<T>): HTMLTableElement {
         if (!currentSort) return rawList;
 
         const dir = sortDirection() === 'asc' ? 1 : -1;
-        const activeCol = normalizedColumns().find(c => String(c.key) === currentSort);
+        const activeCol = normalizedColumns().find(c => c.key === currentSort);
         const customSort = activeCol?.sortFn;
 
         return [...rawList].sort((a, b) => {
@@ -164,12 +204,13 @@ export function Table<T>(props: TableProps<T>): HTMLTableElement {
         });
     });
 
+    const keyProp = props.key;
     const keyFn = (row: T): string | number => {
-        if (typeof props.key === 'function') {
-            return props.key(row);
+        if (typeof keyProp === 'function') {
+            return keyProp(row);
         }
         if (isRecord(row)) {
-            const val = row[props.key as string];
+            const val = row[keyProp];
             if (typeof val === 'function') {
                 return String(val());
             }
@@ -195,29 +236,17 @@ export function Table<T>(props: TableProps<T>): HTMLTableElement {
         };
 
         for (const col of cols) {
-            const colKey = String(col.key);
-            let cellContent: DOMChild | DynamicChild;
-
-            if (col.render) {
-                cellContent = () => {
-                    const row = getCurrentRow();
-                    const rawVal = isRecord(row) ? row[colKey] : undefined;
-                    return col.render ? col.render(rawVal, row, index) : '';
-                };
-            } else {
-                cellContent = () => {
-                    const row = getCurrentRow();
-                    if (!isRecord(row)) return '';
-                    const raw = row[colKey];
-                    const val = typeof raw === 'function' ? raw() : raw;
-                    return val == null ? '' : String(val);
-                };
-            }
+            const colKey = col.key;
+            const cellContent: DOMChild | DynamicChild = () => {
+                const row = getCurrentRow();
+                return col.renderCell(row, index);
+            };
 
             const cellStaticClass = 'mesh-table-cell';
-            const cellClass = typeof col.class === 'function'
-                ? () => `${cellStaticClass} ${col.class ? (col.class as () => string)() : ''}`.trim()
-                : col.class ? `${cellStaticClass} ${col.class}` : cellStaticClass;
+            const colClass = col.class;
+            const cellClass = typeof colClass === 'function'
+                ? () => `${cellStaticClass} ${colClass()}`.trim()
+                : colClass ? `${cellStaticClass} ${colClass}` : cellStaticClass;
 
             const td = h('td', {
                 class: cellClass,
@@ -237,9 +266,9 @@ export function Table<T>(props: TableProps<T>): HTMLTableElement {
         h('tr', {}, () => {
             const cols = normalizedColumns();
             return cols.map(col => {
-                const colKey = String(col.key);
+                const colKey = col.key;
                 const isColSortable = props.sortable !== false && col.sortable !== false;
-                const labelText = typeof col.label === 'function' ? col.label() : col.label ?? colKey;
+                const labelText = typeof col.label === 'function' ? col.label() : col.label;
 
                 const sortIndicator = () => {
                     if (sortColumn() !== colKey) return '';
@@ -254,9 +283,10 @@ export function Table<T>(props: TableProps<T>): HTMLTableElement {
                 const headerStatic = isColSortable
                     ? 'mesh-table-header mesh-table-header-sortable'
                     : 'mesh-table-header';
-                const headerClass = typeof col.headerClass === 'function'
-                    ? () => `${headerStatic} ${(col.headerClass ? (col.headerClass as () => string)() : '')}`.trim()
-                    : col.headerClass ? `${headerStatic} ${col.headerClass}` : headerStatic;
+                const colHeaderClass = col.headerClass;
+                const headerClass = typeof colHeaderClass === 'function'
+                    ? () => `${headerStatic} ${colHeaderClass()}`.trim()
+                    : colHeaderClass ? `${headerStatic} ${colHeaderClass}` : headerStatic;
 
                 return h('th', {
                     scope: 'col',

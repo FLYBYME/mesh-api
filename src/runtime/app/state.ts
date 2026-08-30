@@ -72,6 +72,7 @@ export class AppStateContainerImpl implements AppStateContainer {
     private readonly storage: Storage;
     private readonly activeEffects = new Set<DisposeFn>();
     private readonly activeResources = new Set<LeakableResource>();
+    private store?: object;
     private disposed = false;
 
     constructor(appId: string, scope: ReactiveScope, storage?: Storage) {
@@ -88,6 +89,23 @@ export class AppStateContainerImpl implements AppStateContainer {
 
     get isDisposed(): boolean {
         return this.disposed;
+    }
+
+    set<T extends object>(state: T): void {
+        if (this.disposed) {
+            throw new Error(`Cannot set state on disposed AppState for "${this.appId}"`);
+        }
+        this.store = state;
+    }
+
+    get<T extends object>(): T {
+        if (this.disposed) {
+            throw new Error(`Cannot get state on disposed AppState for "${this.appId}"`);
+        }
+        if (this.store === undefined) {
+            throw new Error(`No state has been set on AppState for "${this.appId}"`);
+        }
+        return this.store as T;
     }
 
     signal<T>(initial: T): Signal<T> {

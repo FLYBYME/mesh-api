@@ -69,15 +69,12 @@ and never *consume* one the way an app does. Ordered by severity.
    was real — curried view factories, module-level mutable singletons, and a hand-rolled fake router
    simulating `navigate`/`replace`/`back`/`forward`/`params`/`query`/`queryParam`. 216 tests pass,
    up from 200; the new suite *consumes* a context the way an app does rather than constructing one.
-2. **`SurfaceDefinition` does not support `views`**, which `07-routing.md` describes as how an app
-   routes within its own subtree.
-3. **`AppStateContainer` lacks store helpers** (`.set()`/`.get()`), so per-app state is more awkward
-   than the spec implies.
-4. **The component catalogue in `06-components.md` does not match what exists.** The spec lists a
-   set; the code ships a different one. Reconcile the doc to reality rather than the reverse — the
-   small set was a deliberate decision.
-5. **`Badge` has no reactive variant binding**, so its variant cannot follow a signal.
-6. **`Table` cell typing is weaker than it needs to be.**
+2. ~~**`SurfaceDefinition` does not support `views`**~~ **Fixed 2026-08-30.** `SurfaceDefinition` now accepts `views?: readonly ViewDefinition[]`. On activation, `AppInstance` mounts declared views automatically into the granted container via `mountViews` with full prefix transparency and isolated reactive scope cleanup.
+3. ~~**`AppStateContainer` lacks store helpers** (`.set()`/`.get()`)~~ **Fixed 2026-08-30.** `AppStateContainer` now provides `.set<T>(state: T)` and `.get<T>(): T` store methods, allowing typed, instance-isolated state sharing between `onLoad` and view functions without module-level globals or duplicate resource instantiation.
+4. ~~**The component catalogue in `06-components.md` does not match what exists.**~~ **Fixed 2026-08-30.** The spec listed ~35 components as though they shipped; 13 do. The doc now separates what exists from what does not, and drops the claim that `Table` is virtualised (Phase 6). Reconciled toward the code, because the small set was a deliberate decision — a consumer who reads
+   the catalogue, writes `Select(...)` and finds out at `tsc` time is the failure this avoids.
+5. ~~**`Badge` has no reactive variant binding**~~ **Fixed 2026-08-30.** `BadgeProps.variant` now accepts `BadgeVariant | (() => BadgeVariant)`, reactively binding class updates to signal dependencies with `flushSync()`.
+6. ~~**`Table` cell typing is weaker than it needs to be.**~~ **Fixed 2026-08-30.** `TableColumn<T>` is now a mapped union over `keyof T & string`, ensuring contextual parameters `render(value: T[K], row: T, index)` are strongly typed with zero casts.
 7. **Microtask reactivity interacts awkwardly with async `resource` timing** — worth a documented
    pattern, since every consumer will hit it.
 8. **No SSE client**, though `08-data.md` and `11-example-kanban.md` both promise live updates

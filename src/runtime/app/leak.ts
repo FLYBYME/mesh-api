@@ -19,7 +19,7 @@ export class AppLeakError extends Error {
  * Dev-mode assertion checking that an App has released all effects, subscriptions,
  * timers, and DOM elements upon unload.
  */
-export function assertNoAppLeaks(instance: AppInstance): void {
+export function assertNoAppLeaks<TApi>(instance: AppInstance<TApi>): void {
     const appId = instance.id;
     let leaks = 0;
     const details: string[] = [];

@@ -2,8 +2,10 @@ import './badge.css';
 import type { Child, Props } from '../types.js';
 import { h } from '../h.js';
 
+export type BadgeVariant = 'default' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
+
 export interface BadgeProps {
-    variant?: 'default' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
+    variant?: BadgeVariant | (() => BadgeVariant);
     size?: 'sm' | 'md';
     class?: string | (() => string);
     ref?: (el: HTMLElement) => void;
@@ -14,19 +16,26 @@ export interface BadgeProps {
  * Status and metadata tag badge.
  */
 export function Badge(props: BadgeProps = {}, ...children: Child[]): HTMLElement {
-    const variant = props.variant ?? 'default';
     const size = props.size ?? 'sm';
+    const variantProp = props.variant ?? 'default';
+    const classProp = props.class;
 
-    const classList: string[] = [
-        'mesh-badge',
-        `mesh-badge-variant-${variant}`,
-        `mesh-badge-size-${size}`,
-    ];
+    const baseClass = `mesh-badge mesh-badge-size-${size}`;
+    const isDynamicVariant = typeof variantProp === 'function';
+    const isDynamicClass = typeof classProp === 'function';
 
-    const staticClass = classList.join(' ');
-    const mergedClass = typeof props.class === 'function'
-        ? () => `${staticClass} ${props.class ? (props.class as () => string)() : ''}`.trim()
-        : props.class ? `${staticClass} ${props.class}` : staticClass;
+    let mergedClass: string | (() => string);
+
+    if (isDynamicVariant || isDynamicClass) {
+        mergedClass = () => {
+            const v = typeof variantProp === 'function' ? variantProp() : variantProp;
+            const extra = typeof classProp === 'function' ? classProp() : (classProp ?? '');
+            return `${baseClass} mesh-badge-variant-${v} ${extra}`.trim();
+        };
+    } else {
+        const extra = classProp ? ` ${classProp}` : '';
+        mergedClass = `${baseClass} mesh-badge-variant-${variantProp}${extra}`.trim();
+    }
 
     const elementProps: Props = {
         class: mergedClass,

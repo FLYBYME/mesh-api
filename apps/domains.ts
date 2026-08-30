@@ -12,7 +12,6 @@ import {
     Spinner,
     EmptyState,
     defineApp,
-    mountViews,
     type AppContext,
     type AppDefinition,
     type ViewDefinition,
@@ -302,10 +301,11 @@ export function createDomainAppState(
 
 export function DomainsListView(
     ctx: AppContext<DomainApiClient>,
-    appState: DomainAppState
+    appState?: DomainAppState
 ): HTMLElement {
     const api = ctx.api ?? createInMemoryApiClient();
-    const { domainsResource, fqdnFilter, filteredDomains } = appState;
+    const state = appState ?? ctx.state.get<DomainAppState>();
+    const { domainsResource, fqdnFilter, filteredDomains } = state;
 
     // 1. Header
     const header = h('div', { class: 'domains-list-header' },
@@ -372,7 +372,7 @@ export function DomainsListView(
                 key: 'verificationStatus',
                 label: 'Verification',
                 render: (val) => {
-                    const status = String(val ?? 'pending');
+                    const status = val ?? 'pending';
                     const variant = status === 'verified' ? 'success' : status === 'failed' ? 'danger' : 'warning';
                     return Badge({ variant, class: `verification-badge verification-${status}` }, status);
                 },
@@ -381,7 +381,7 @@ export function DomainsListView(
                 key: 'status',
                 label: 'Status',
                 render: (val) => {
-                    const status = String(val ?? 'active');
+                    const status = val ?? 'active';
                     const variant = status === 'active' ? 'success' : 'default';
                     return Badge({ variant, class: `status-badge status-${status}` }, status);
                 },
@@ -421,10 +421,11 @@ export function DomainsListView(
 
 export function DomainDetailView(
     ctx: AppContext<DomainApiClient>,
-    appState: DomainAppState
+    appState?: DomainAppState
 ): HTMLElement {
     const api = ctx.api ?? createInMemoryApiClient();
-    const { activeDomainId, activeDomainResource, activeDnsRecordsResource, domainsResource } = appState;
+    const state = appState ?? ctx.state.get<DomainAppState>();
+    const { activeDomainId, activeDomainResource, activeDnsRecordsResource, domainsResource } = state;
 
     // Keep active domain ID reactively in sync with route params if router is present
     if (ctx.router) {
@@ -445,18 +446,18 @@ export function DomainDetailView(
         Heading({ level: 1, class: 'domain-fqdn-title' }, () => activeDomainResource.data()?.fqdn ?? 'Domain Details'),
         Row({ gap: 'sm', class: 'domain-badges-row' },
             Badge({
-                class: () => {
+                variant: () => {
                     const s = activeDomainResource.data()?.verificationStatus;
-                    const vClass = s === 'verified' ? 'mesh-badge-variant-success' : s === 'failed' ? 'mesh-badge-variant-danger' : 'mesh-badge-variant-warning';
-                    return `detail-verification-badge ${vClass}`;
+                    return s === 'verified' ? 'success' : s === 'failed' ? 'danger' : 'warning';
                 },
+                class: 'detail-verification-badge',
             }, () => `Verification: ${activeDomainResource.data()?.verificationStatus ?? 'pending'}`),
             Badge({
-                class: () => {
+                variant: () => {
                     const s = activeDomainResource.data()?.status;
-                    const vClass = s === 'active' ? 'mesh-badge-variant-success' : 'mesh-badge-variant-default';
-                    return `detail-status-badge ${vClass}`;
+                    return s === 'active' ? 'success' : 'default';
                 },
+                class: 'detail-status-badge',
             }, () => `Status: ${activeDomainResource.data()?.status ?? 'active'}`)
         )
     );
@@ -561,15 +562,15 @@ export function DomainDetailView(
 
 export const domainViews = (
     ctx: AppContext<DomainApiClient>,
-    appState: DomainAppState
-): readonly ViewDefinition[] => [
+    appState?: DomainAppState
+): readonly ViewDefinition<DomainApiClient>[] => [
     {
         path: '/',
-        view: () => DomainsListView(ctx, appState),
+        view: (_props, viewCtx) => DomainsListView(viewCtx ?? ctx, appState),
     },
     {
         path: '/:id',
-        view: () => DomainDetailView(ctx, appState),
+        view: (_props, viewCtx) => DomainDetailView(viewCtx ?? ctx, appState),
     },
 ];
 
@@ -577,34 +578,24 @@ export const domainsApp: AppDefinition<DomainApiClient> = defineApp({
     id: 'domains',
     title: 'Domains',
 
-    async onLoad(ctx: AppContext<DomainApiClient>) {
-        const appState = createDomainAppState(ctx);
-
-        // The app never places itself -- requests a surface from the compositor
-        // Refusal is handled gracefully without throwing
-        const pageSurface = await ctx.requestSurface({ role: 'page' });
-        if (!pageSurface.granted) {
-            return;
-        }
-
-        if (ctx.router) {
-            const views = domainViews(ctx, appState);
-            const cleanupViews = mountViews(pageSurface.container, views, ctx.router);
-            ctx.registerCleanup(cleanupViews);
-        }
+    onLoad(ctx: AppContext<DomainApiClient>) {
+        ctx.state.set(createDomainAppState(ctx));
     },
 
     surfaces: [
         {
             role: 'page',
             route: '/domains/*',
-            mount(container: HTMLElement, ctx: AppContext<DomainApiClient>) {
-                const appState = createDomainAppState(ctx);
-                if (ctx.router) {
-                    const views = domainViews(ctx, appState);
-                    return mountViews(container, views, ctx.router);
-                }
-            },
+            views: [
+                {
+                    path: '/',
+                    view: (_props, ctx) => DomainsListView(ctx ?? _props.ctx!),
+                },
+                {
+                    path: '/:id',
+                    view: (_props, ctx) => DomainDetailView(ctx ?? _props.ctx!),
+                },
+            ],
         },
     ],
 });

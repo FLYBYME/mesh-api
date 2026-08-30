@@ -5,8 +5,10 @@ import type {
     DisposeFn,
     EffectFn,
 } from '../reactivity/types.js';
-import type { ScopedRouter } from '../router/types.js';
+import type { ScopedRouter, ViewDefinition } from '../router/types.js';
 import type { TopLevelNavigationHost } from '../router/scoped.js';
+
+export type { ViewDefinition };
 
 /**
  * Closed set of surface roles.
@@ -74,6 +76,7 @@ export interface SurfaceDefinition<TApi = unknown> {
     readonly role: SurfaceRole;
     readonly slot?: string;
     readonly route?: string;
+    readonly views?: readonly ViewDefinition<TApi>[];
     mount?(container: HTMLElement, ctx: AppContext<TApi>): void | (() => void) | Promise<void | (() => void)>;
 }
 
@@ -101,6 +104,8 @@ export interface AppStateContainer {
     /** Mirrors `resource`'s real signature exactly: a fetcher, nothing else. */
     resource<T>(fetcher: () => Promise<T>): Resource<T>;
     persisted<T>(key: string, initial: T): Signal<T>;
+    set<T extends object>(state: T): void;
+    get<T extends object>(): T;
     dispose(): void;
     readonly isDisposed: boolean;
 }

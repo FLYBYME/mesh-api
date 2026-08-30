@@ -9,6 +9,7 @@ import { AppContextImpl } from './context.js';
 import type { Compositor } from './compositor.js';
 import { assertNoAppLeaks } from './leak.js';
 import type { ScopedRouter } from '../router/types.js';
+import { mountViews } from '../router/view.js';
 
 /**
  * AppInstance: manages the runtime lifecycle, scope, and surfaces of a single App.
@@ -101,9 +102,21 @@ export class AppInstance<TApi = unknown> {
                                 {
                                     role: surfaceDef.role,
                                     slot: surfaceDef.slot,
-                                    mount: surfaceDef.mount
-                                        ? (el) => surfaceDef.mount!(el, this.ctx)
-                                        : undefined,
+                                    mount: (container) => {
+                                        if (surfaceDef.mount) {
+                                            return surfaceDef.mount(container, this.ctx);
+                                        }
+                                        if (surfaceDef.views && this.ctx.router) {
+                                            const cleanup = mountViews(
+                                                container,
+                                                surfaceDef.views,
+                                                this.ctx.router,
+                                                this.ctx
+                                            );
+                                            this.ctx.registerCleanup(cleanup);
+                                            return cleanup;
+                                        }
+                                    },
                                 },
                                 this.ctx
                             );

@@ -44,6 +44,7 @@ export type {
     InputProps,
     CardProps,
     BadgeProps,
+    BadgeVariant,
     SpinnerProps,
     EmptyStateProps,
     ErrorStateProps,

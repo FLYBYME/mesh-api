@@ -4,6 +4,7 @@ export type {
     SurfaceResult,
     SurfaceRequest,
     SurfaceDefinition,
+    ViewDefinition,
     AppLifecycleState,
     AppStateContainer,
     AppContext,
