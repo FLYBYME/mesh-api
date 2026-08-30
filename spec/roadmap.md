@@ -56,12 +56,19 @@ Verified independently (`test/dom/independent-verification.test.ts`) on the prop
 Eight gaps, none catchable by the existing tests, because the runtime suites *construct* contexts
 and never *consume* one the way an app does. Ordered by severity.
 
-1. **`AppContext` has no `ctx.router` and no `ctx.api`.** Specs 07, 08 and 11 all state that every
-   app receives them. `src/runtime/app/types.ts:120-128` exposes only `appId`, `state`, `status`,
-   `requestSurface`, `registerCleanup`, `trackLeakable`. The app had to take a router and API client
-   through factory functions instead. **This is the framework's central promise — an app gets its
-   context and everything it needs is on it — currently unmet.** Fix first; every later app inherits
-   the workaround otherwise.
+1. ~~**`AppContext` has no `ctx.router` and no `ctx.api`.**~~ **Fixed 2026-08-30** (`245847c`). The
+   router is owned by the top-level `Router`, which hands scoped instances to `AppHost`, which
+   passes them into the context — not the compositor, which places surfaces and knows nothing about
+   URLs. `ctx.router` is `ScopedRouter | undefined` rather than a null object, because a null router
+   that silently swallows `navigate()` makes a misconfiguration indistinguishable from working
+   navigation; spec 07 read as though it were unconditional and was corrected. `ctx.api` is a typed
+   injection point generic in `TApi`, with the host staying API-agnostic — the seam is real, the
+   Phase 5 network layer behind it is not, and `ctx.api.events.on(...)` is deliberately **not**
+   stubbed because there is no SSE client (finding #8) and a type implying one would be believed.
+   `apps/domains.ts` fell from 747 to 482 lines; what the retrofit deleted is the evidence the gap
+   was real — curried view factories, module-level mutable singletons, and a hand-rolled fake router
+   simulating `navigate`/`replace`/`back`/`forward`/`params`/`query`/`queryParam`. 216 tests pass,
+   up from 200; the new suite *consumes* a context the way an app does rather than constructing one.
 2. **`SurfaceDefinition` does not support `views`**, which `07-routing.md` describes as how an app
    routes within its own subtree.
 3. **`AppStateContainer` lacks store helpers** (`.set()`/`.get()`), so per-app state is more awkward
