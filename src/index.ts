@@ -15,12 +15,23 @@ export type {
     AuthExposeEntry,
     PermissionExposeEntry,
     ExposeEntry,
+    AuthEventExposeEntry,
+    PermissionEventExposeEntry,
     EventExposeEntry,
     WebConfig,
 } from './exposure/types.js';
 export { WebServiceModule } from './exposure/WebServiceModule.js';
 export { mountRest, type MountRestOptions } from './exposure/rest.js';
+export {
+    mountEvents,
+    validateEventExposeEntry,
+    extractEventScope,
+    type MountEventsOptions,
+    type BufferedEvent,
+    type ValidatedEventEntry,
+} from './exposure/events.js';
 export { toHttpError, type HttpErrorBody } from './exposure/errors.js';
+
 export { coerceToSchema, objectShapeOf, formatZodError } from './exposure/input.js';
 export {
     unwrapSchema,

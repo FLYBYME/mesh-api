@@ -1,0 +1,93 @@
+You are working in /home/ubuntu/code/mesh-api.
+
+## The assignment
+
+Build the **SSE event bridge** — Phase 5's first piece, and consumer finding #8. Two specs promise
+live updates today and there is no client behind them.
+
+Read first:
+  spec/08-data.md              (`ctx.api.events.on(...)`, and `ctx.api.stream.*`)
+  spec/11-example-kanban.md    (the worked example that subscribes to card.updated / card.created)
+  spec/roadmap.md              ("Phase 5 — the network layer", and finding #8)
+  spec/01-exposure.md          (the exposure policy -- events are exposed the same way contracts are)
+  src/exposure/rest.ts         (how a contract becomes a route, and how `checkAuth` gates it)
+  src/exposure/broker.ts       (ExposureBroker -- the structural interface, no global augmentation)
+  src/runtime/app/types.ts     (AppContext: `api` is a typed injection point, generic in TApi)
+
+## Why this one, and what "done" means
+
+`08-data.md` and `11-example-kanban.md` both show `ctx.api.events.on('card.updated', …)`. Dispatch
+#10 deliberately did **not** stub that, because a type implying an SSE client exists would be
+believed by the next consumer. So the promise is currently unmet and honestly labelled. This closes
+it for real.
+
+**Done means a real app receives a real event over a real HTTP connection**, not that a class
+exists. The whole history of this package is that defects appear when something runs: an MCP
+transport that 500s on the *second* request, a `.css` import that crashes Node at startup, a base
+path that 404s against its own server. None were caught by unit tests. Write the test that opens an
+actual server and an actual EventSource-shaped connection.
+
+## What to build
+
+### 1. Server: `GET /api/events?topics=…` returning `text/event-stream`
+
+- **Explicit topic exposure.** A topic is reachable only if listed, exactly like `expose` for
+  contracts. No wildcard. An unlisted topic is not an error you can probe your way around — decide
+  and document whether it is 403 or silently absent from the stream, and say why.
+- **`scope` enforced at fan-out, per subscriber.** This is the security property that matters: two
+  subscribers on one topic must receive different events when their scopes differ. Reuse the
+  per-org authorization already in this package (`27e6cfb`, `68ac11d`) rather than inventing a
+  second rule — a caller scoped to org A must never receive an event about org B, and there must be
+  a test that proves exactly that.
+- Correct SSE framing: `event:`, `data:`, `id:`, heartbeat comments to keep intermediaries from
+  closing an idle stream, and `Last-Event-ID` honoured on reconnect if you keep a buffer (if you do
+  not, say so plainly rather than implying replay works).
+- Clean teardown: a disconnected client must not leak a broker subscription. Assert it.
+
+### 2. Client: `ctx.api.events`
+
+- `on(topic, handler)` returning an unsubscribe function.
+- Wired through the existing `ctx.api` injection seam — do **not** add a second, parallel way for an
+  app to reach the backend.
+- **Reconnect with backoff and jitter.** A server restart must not leave every browser hammering it
+  in lockstep.
+- Disposed with the app: unloading an app closes its stream and stops its handlers. The runtime
+  already has `registerCleanup`/`trackLeakable`; use them.
+
+### 3. Types
+
+The event payload types must come from the same source the contracts do. If the current codegen
+cannot express them, say so precisely rather than widening to `unknown` and calling it done.
+
+## Rules
+
+- **Do not `git commit`.** Leave the work in the working tree.
+- **Zero `as any` / `as unknown as` / `as never`.** Absolute in this codebase.
+- No new dependencies. Node has everything needed server-side; the browser has `EventSource`. If
+  you believe a dependency is unavoidable, stop and explain in your summary instead of adding one.
+- **DOM test files need `// @vitest-environment happy-dom` at the top.** Vitest 4 removed
+  `environmentMatchGlobs`; without the docblock a file silently has no `document`.
+- **Effects are microtask-scheduled** — use `flushSync()` before asserting on the DOM.
+- `npm run typecheck` (covers `src` AND `test`) and `npx vitest run` must pass with all 221
+  existing tests green.
+- Keep the two entry points separate: `.` is exposure (Node), `./runtime` is the browser. A server
+  import leaking into the runtime bundle crashed every Node consumer once already.
+- Comments explain *why*. House style: `src/exposure/broker.ts`, `src/runtime/dom/h.ts`.
+
+## Verification
+
+  - a real server, a real client, one event published and received end to end
+  - **two subscribers with different scopes receive different events** — the org-isolation test
+  - an unexposed topic is not deliverable, however the client asks for it
+  - a dropped connection reconnects, and the backoff is not a tight loop (assert the delays grow)
+  - unloading an app closes its stream and leaves no broker subscription behind
+  - a second connection to the same endpoint works — the MCP transport bug was exactly this, and it
+    passed every smoke test that only ever made one request
+
+## Finish by printing
+
+  1. Each file created or changed, one line each.
+  2. Your decision on unexposed topics (403 vs absent) and the reasoning.
+  3. What replay/`Last-Event-ID` actually does, precisely — including "nothing" if that is the truth.
+  4. How event payload types are derived, and anything you could not type without widening.
+  5. Anything in specs 08 or 11 that is still wrong after this lands.

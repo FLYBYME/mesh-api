@@ -179,3 +179,12 @@ export {
     Router,
     createRouter,
 } from './router/index.js';
+
+// Live Event Stream Bridge
+export type {
+    EventBridgeState,
+    EventBridgeClientOptions,
+    EventBridgeClient,
+} from './events/index.js';
+export { createEventBridgeClient } from './events/index.js';
+

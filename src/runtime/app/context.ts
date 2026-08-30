@@ -9,6 +9,23 @@ import type { AppStateContainerImpl } from './state.js';
 import type { Compositor } from './compositor.js';
 import type { ScopedRouter } from '../router/types.js';
 
+interface CloseableEventsHolder {
+    readonly events: {
+        close(): void;
+        readonly isDisposed?: boolean;
+    };
+}
+
+function isCloseableEventsHolder(val: unknown): val is CloseableEventsHolder {
+    if (typeof val !== 'object' || val === null) return false;
+    if (!('events' in val)) return false;
+    const events = (val as { readonly events: unknown }).events;
+    if (typeof events !== 'object' || events === null) return false;
+    if (!('close' in events)) return false;
+    const closeFn = (events as { readonly close: unknown }).close;
+    return typeof closeFn === 'function';
+}
+
 /**
  * AppContextImpl: context instance provided to an App during its lifecycle.
  *
@@ -23,7 +40,7 @@ export class AppContextImpl<TApi = unknown> implements AppContext<TApi> {
     readonly appId: string;
     readonly state: AppStateContainerImpl;
     private _status: AppLifecycleState = 'registered';
-    private readonly compositor: Compositor;
+    private readonly compositor?: Compositor;
     private readonly cleanups: Array<() => void> = [];
     private readonly leakTrackers: Array<LeakableResource | (() => void)> = [];
     readonly router?: ScopedRouter;
@@ -32,7 +49,7 @@ export class AppContextImpl<TApi = unknown> implements AppContext<TApi> {
     constructor(
         appId: string,
         state: AppStateContainerImpl,
-        compositor: Compositor,
+        compositor?: Compositor,
         router?: ScopedRouter,
         api?: TApi
     ) {
@@ -41,6 +58,17 @@ export class AppContextImpl<TApi = unknown> implements AppContext<TApi> {
         this.compositor = compositor;
         this.router = router;
         this.api = api;
+
+        if (isCloseableEventsHolder(api)) {
+            const events = api.events;
+            this.registerCleanup(() => events.close());
+            this.trackLeakable({
+                get isDisposed() {
+                    return events.isDisposed ?? false;
+                },
+                dispose: () => events.close(),
+            });
+        }
     }
 
     get status(): AppLifecycleState {
@@ -55,8 +83,12 @@ export class AppContextImpl<TApi = unknown> implements AppContext<TApi> {
         if (this._status === 'unloaded' || this._status === 'failed') {
             return { granted: false, reason: 'cancelled' };
         }
+        if (!this.compositor) {
+            return { granted: false, reason: 'cancelled' };
+        }
         return this.compositor.requestSurface(this.appId, request, this);
     }
+
 
     registerCleanup(cleanup: () => void): void {
         this.cleanups.push(cleanup);

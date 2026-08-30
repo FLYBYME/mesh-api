@@ -1,8 +1,9 @@
 import express, { type Router, type Request, type Response, type NextFunction } from 'express';
 import { toolKey, type IMeshApp, type IServiceBroker, type ServiceModule } from '@flybyme/mesh';
-import type { ExposeEntry } from '../exposure/types.js';
+import type { ExposeEntry, EventExposeEntry } from '../exposure/types.js';
 import { WebServiceModule } from '../exposure/WebServiceModule.js';
 import { mountRest } from '../exposure/rest.js';
+import { mountEvents } from '../exposure/events.js';
 import type { SessionStore, SessionUser, AuthorizeHook } from '../auth/types.js';
 import { MemorySessionStore } from '../auth/MemorySessionStore.js';
 import { readSessionId, type CookieOptions } from '../auth/session.js';
@@ -17,12 +18,16 @@ export interface CreateWebServerOptions {
     readonly authorize?: AuthorizeHook;
     readonly cookie?: Partial<CookieOptions>;
     readonly basePath?: string;
+    readonly events?: readonly EventExposeEntry[];
+    readonly heartbeatIntervalMs?: number;
 }
 
 export interface CreateWebServerResult {
     readonly router: Router;
     readonly exposed: readonly ExposeEntry[];
+    readonly events?: readonly EventExposeEntry[];
 }
+
 
 /**
  * createWebServer: assembles the REST API, session handling, and authentication routes.
@@ -33,7 +38,9 @@ export interface CreateWebServerResult {
  */
 export function createWebServer(options: CreateWebServerOptions): CreateWebServerResult {
     const exposed: ExposeEntry[] = [];
+    const exposedEvents: EventExposeEntry[] = [];
     const seenToolKeys = new Map<string, string>();
+    const seenEventNames = new Map<string, string>();
     const moduleAuthorizers = new Map<string, AuthorizeHook>();
 
     for (const module of options.modules) {
@@ -52,6 +59,27 @@ export function createWebServer(options: CreateWebServerOptions): CreateWebServe
                         moduleAuthorizers.set(key, config.authorize);
                     }
                 }
+            }
+            if (config?.events) {
+                for (const entry of config.events) {
+                    const eventName = typeof entry.event === 'string' ? entry.event : entry.event.name;
+                    const existingDomain = seenEventNames.get(eventName);
+                    if (existingDomain !== undefined) {
+                        throw new Error(`Duplicate exposed event: event '${eventName}' is exposed by multiple modules ('${existingDomain}' and '${module.domain}')`);
+                    }
+                    seenEventNames.set(eventName, module.domain);
+                    exposedEvents.push(entry);
+                }
+            }
+        }
+    }
+
+    if (options.events) {
+        for (const entry of options.events) {
+            const eventName = typeof entry.event === 'string' ? entry.event : entry.event.name;
+            if (!seenEventNames.has(eventName)) {
+                seenEventNames.set(eventName, 'options');
+                exposedEvents.push(entry);
             }
         }
     }
@@ -94,8 +122,8 @@ export function createWebServer(options: CreateWebServerOptions): CreateWebServe
     // Build composite authorizer: module authorizer takes precedence for its own contracts, falling back to server authorizer
     const compositeAuthorize: AuthorizeHook | undefined = (moduleAuthorizers.size > 0 || options.authorize !== undefined)
         ? async (input) => {
-            const key = toolKey(input.contract);
-            const moduleAuth = moduleAuthorizers.get(key);
+            const key = input.contract ? toolKey(input.contract) : undefined;
+            const moduleAuth = key ? moduleAuthorizers.get(key) : undefined;
             if (moduleAuth) {
                 return moduleAuth(input);
             }
@@ -113,6 +141,16 @@ export function createWebServer(options: CreateWebServerOptions): CreateWebServe
         authorize: compositeAuthorize,
     });
 
+    // Mount SSE event bridge endpoints (/events)
+    if (exposedEvents.length > 0) {
+        mountEvents(apiRouter, {
+            broker,
+            events: exposedEvents,
+            authorize: compositeAuthorize,
+            heartbeatIntervalMs: options.heartbeatIntervalMs,
+        });
+    }
+
     // Mount under basePath (default /api)
     const basePath = options.basePath ?? DEFAULT_BASE_PATH;
     if (basePath === '' || basePath === '/') {
@@ -125,5 +163,7 @@ export function createWebServer(options: CreateWebServerOptions): CreateWebServe
     return {
         router: rootRouter,
         exposed,
+        events: exposedEvents,
     };
 }
+

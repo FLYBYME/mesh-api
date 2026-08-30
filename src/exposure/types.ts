@@ -44,16 +44,34 @@ export interface PermissionExposeEntry {
 export type ExposeEntry = AuthExposeEntry | PermissionExposeEntry;
 
 /**
+ * AuthEventExposeEntry: one mesh event bridged to browsers over SSE with coarse auth.
+ */
+export interface AuthEventExposeEntry {
+    readonly event: string | import('@flybyme/mesh').EventDefinition<import('@flybyme/mesh').z.ZodTypeAny>;
+    readonly auth: AuthLevel;
+    readonly permission?: never;
+    readonly scope?: 'global' | 'tenant' | 'org' | string;
+    readonly schema?: import('@flybyme/mesh').z.ZodTypeAny;
+}
+
+/**
+ * PermissionEventExposeEntry: one mesh event bridged to browsers over SSE with permission check.
+ */
+export interface PermissionEventExposeEntry {
+    readonly event: string | import('@flybyme/mesh').EventDefinition<import('@flybyme/mesh').z.ZodTypeAny>;
+    readonly permission: string;
+    readonly auth?: never;
+    readonly scope?: 'global' | 'tenant' | 'org' | string;
+    readonly schema?: import('@flybyme/mesh').z.ZodTypeAny;
+}
+
+/**
  * EventExposeEntry: one mesh event bridged to browsers over SSE.
  *
  * An event stream is a read API, so it is exposed exactly as explicitly as a contract is.
  * `scope` decides who receives a given event and is enforced server-side at fan-out.
  */
-export interface EventExposeEntry {
-    readonly event: string;
-    readonly auth: AuthLevel;
-    readonly scope?: 'global' | 'tenant';
-}
+export type EventExposeEntry = AuthEventExposeEntry | PermissionEventExposeEntry;
 
 /**
  * WebConfig: what a service declares when it turns on the web feature.
@@ -68,3 +86,4 @@ export interface WebConfig {
      */
     readonly authorize?: AuthorizeHook;
 }
+

@@ -1,9 +1,9 @@
-#!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
 import { z, type ToolContract, globalContractRegistry } from '@flybyme/mesh';
+
 import { CSRF_HEADER } from '../auth/session.js';
-import type { ExposeEntry } from '../exposure/types.js';
+import type { ExposeEntry, EventExposeEntry } from '../exposure/types.js';
 import { DEFAULT_BASE_PATH } from '../exposure/paths.js';
 
 export interface CodegenContext {
@@ -14,7 +14,9 @@ export interface CodegenContext {
 
 export interface GenerateClientOptions {
     readonly baseUrl?: string;
+    readonly events?: readonly (EventExposeEntry | string | import('@flybyme/mesh').EventDefinition<z.ZodTypeAny>)[];
 }
+
 
 function toPascalCase(str: string): string {
     return str
@@ -175,22 +177,80 @@ function getContract(item: ExposeEntry | ToolContract): ToolContract {
     return item;
 }
 
-/**
- * Generates self-contained TypeScript client code with zero zod or mesh runtime dependencies.
- */
 export function generateClient(
-    exposed: readonly (ExposeEntry | ToolContract)[],
+    exposed:
+        | readonly (ExposeEntry | ToolContract)[]
+        | {
+              readonly expose: readonly (ExposeEntry | ToolContract)[];
+              readonly events?: readonly (EventExposeEntry | string | import('@flybyme/mesh').EventDefinition<z.ZodTypeAny>)[];
+          },
     options?: GenerateClientOptions
 ): string {
+    let exposedContracts: readonly (ExposeEntry | ToolContract)[];
+    let rawEvents: readonly (EventExposeEntry | string | import('@flybyme/mesh').EventDefinition<z.ZodTypeAny>)[];
+
+    if ('expose' in exposed) {
+        exposedContracts = exposed.expose;
+        rawEvents = exposed.events ?? options?.events ?? [];
+    } else {
+        exposedContracts = exposed;
+        rawEvents = options?.events ?? [];
+    }
+
+
     const contracts: ToolContract[] = [];
     const seen = new Set<string>();
 
-    for (const item of exposed) {
+
+    for (const item of exposedContracts) {
         const contract = getContract(item);
         const key = `${contract.domain}.${contract.action}`;
         if (!seen.has(key)) {
             seen.add(key);
             contracts.push(contract);
+        }
+    }
+
+    interface EventCodegenInfo {
+        name: string;
+        typeName: string;
+        schema?: z.ZodTypeAny;
+    }
+    const eventsInfo: EventCodegenInfo[] = [];
+    const seenEvents = new Set<string>();
+
+    for (const item of rawEvents) {
+        let name = '';
+        let schema: z.ZodTypeAny | undefined = undefined;
+
+        if (typeof item === 'string') {
+            name = item.trim();
+        } else if (typeof item === 'object' && item !== null) {
+            if ('event' in item) {
+                const subEvent = (item as { event: unknown }).event;
+                if (typeof subEvent === 'string') {
+                    name = subEvent.trim();
+                } else if (typeof subEvent === 'object' && subEvent !== null && 'name' in subEvent) {
+                    name = (subEvent as { name: string }).name;
+                    if ('schema' in subEvent) {
+                        schema = (subEvent as { schema: z.ZodTypeAny }).schema;
+                    }
+                }
+                if (!schema && 'schema' in item && (item as { schema: z.ZodTypeAny }).schema) {
+                    schema = (item as { schema: z.ZodTypeAny }).schema;
+                }
+            } else if ('name' in item) {
+                name = (item as { name: string }).name;
+                if ('schema' in item) {
+                    schema = (item as { schema: z.ZodTypeAny }).schema;
+                }
+            }
+        }
+
+        if (name && !seenEvents.has(name)) {
+            seenEvents.add(name);
+            const typeName = `${toPascalCase(name)}Event`;
+            eventsInfo.push({ name, typeName, schema });
         }
     }
 
@@ -273,8 +333,225 @@ export function generateClient(
         out.push(``);
     }
 
+    // Emit Type Definitions for each event with schema
+    for (const ev of eventsInfo) {
+        if (ev.schema) {
+            const evTs = zodTypeToTs(ev.schema, {
+                toolKey: ev.name,
+                path: ['eventSchema'],
+                indent: 0,
+            });
+            if (evTs.startsWith('{')) {
+                out.push(`export interface ${ev.typeName} ${evTs}`);
+            } else {
+                out.push(`export type ${ev.typeName} = ${evTs};`);
+            }
+            out.push(``);
+        }
+    }
+
+    // Emit EventMap interface
+    out.push(`export interface EventMap {`);
+    for (const ev of eventsInfo) {
+        if (ev.schema) {
+            out.push(`  ${JSON.stringify(ev.name)}: ${ev.typeName};`);
+        } else {
+            out.push(`  ${JSON.stringify(ev.name)}: Record<string, unknown>;`);
+        }
+    }
+    out.push(`  [topic: string]: unknown;`);
+    out.push(`}`);
+    out.push(``);
+
+    // Emit EventBridgeClient interface
+    out.push(`export type EventBridgeState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'closed';`);
+    out.push(``);
+    out.push(`export interface EventBridgeClient<TEvents = EventMap> {`);
+    out.push(`  readonly status: EventBridgeState;`);
+    out.push(`  readonly isDisposed: boolean;`);
+    out.push(`  on<K extends keyof TEvents>(topic: K, handler: (payload: TEvents[K]) => void): () => void;`);
+    out.push(`  on<T = unknown>(topic: string, handler: (payload: T) => void): () => void;`);
+    out.push(`  close(): void;`);
+    out.push(`  dispose(): void;`);
+    out.push(`}`);
+    out.push(``);
+
+    // Emit createEventBridgeClient implementation
+    out.push(`export function createEventBridgeClient<TEvents = EventMap>(options: ApiClientOptions = {}): EventBridgeClient<TEvents> {`);
+    out.push(`  const baseUrl = options.baseUrl ?? ${JSON.stringify(options?.baseUrl ?? DEFAULT_BASE_PATH)};`);
+    out.push(`  const customFetch = options.fetch ?? globalThis.fetch;`);
+    out.push(`  let status: EventBridgeState = 'idle';`);
+    out.push(`  let isDisposed = false;`);
+    out.push(`  let reconnectAttempt = 0;`);
+    out.push(`  let lastEventId: string | undefined = undefined;`);
+    out.push(`  let reconnectTimer: ReturnType<typeof setTimeout> | undefined = undefined;`);
+    out.push(`  let connectScheduled = false;`);
+    out.push(`  let abortController: AbortController | null = null;`);
+    out.push(`  const topicHandlers = new Map<string, Set<(payload: unknown) => void>>();`);
+    out.push(`  let connectedTopicsKey = '';`);
+    out.push(``);
+    out.push(`  const getActiveTopics = (): string[] => {`);
+    out.push(`    const list: string[] = [];`);
+    out.push(`    for (const [topic, handlers] of topicHandlers.entries()) {`);
+    out.push(`      if (handlers.size > 0) list.push(topic);`);
+    out.push(`    }`);
+    out.push(`    return list.sort();`);
+    out.push(`  };`);
+    out.push(``);
+    out.push(`  const scheduleReconnect = (): void => {`);
+    out.push(`    if (isDisposed || status === 'closed') return;`);
+    out.push(`    const topics = getActiveTopics();`);
+    out.push(`    if (topics.length === 0) { status = 'idle'; return; }`);
+    out.push(`    status = 'reconnecting';`);
+    out.push(`    const baseDelay = 1000 * Math.pow(2, reconnectAttempt);`);
+    out.push(`    const cappedDelay = Math.min(30000, baseDelay);`);
+    out.push(`    const rand = Math.random();`);
+    out.push(`    const delayMs = Math.max(0, Math.round(cappedDelay * (0.75 + rand * 0.5)));`);
+    out.push(`    reconnectAttempt++;`);
+    out.push(`    if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);`);
+    out.push(`    reconnectTimer = setTimeout(() => {`);
+    out.push(`      reconnectTimer = undefined;`);
+    out.push(`      void connect();`);
+    out.push(`    }, delayMs);`);
+    out.push(`  };`);
+    out.push(``);
+    out.push(`  const connect = async (): Promise<void> => {`);
+    out.push(`    if (isDisposed || status === 'closed') return;`);
+    out.push(`    const topics = getActiveTopics();`);
+    out.push(`    if (topics.length === 0) { status = 'idle'; return; }`);
+    out.push(`    const currentKey = topics.join(',');`);
+    out.push(`    connectedTopicsKey = currentKey;`);
+    out.push(`    if (abortController !== null) {`);
+    out.push(`      abortController.abort();`);
+    out.push(`      abortController = null;`);
+    out.push(`    }`);
+    out.push(`    const controller = new AbortController();`);
+    out.push(`    abortController = controller;`);
+    out.push(`    status = 'connecting';`);
+    out.push(`    const resolvedHeaders: Record<string, string> = {`);
+    out.push(`      Accept: 'text/event-stream',`);
+    out.push(`      ...(options.headers ? (typeof options.headers === 'function' ? await options.headers() : options.headers) : {}),`);
+    out.push(`    };`);
+    out.push(`    if (lastEventId !== undefined) {`);
+    out.push(`      resolvedHeaders['Last-Event-ID'] = lastEventId;`);
+    out.push(`    }`);
+    out.push(`    const url = baseUrl + '/events?topics=' + encodeURIComponent(currentKey);`);
+    out.push(`    try {`);
+    out.push(`      const res = await customFetch(url, {`);
+    out.push(`        method: 'GET',`);
+    out.push(`        headers: resolvedHeaders,`);
+    out.push(`        credentials: 'include',`);
+    out.push(`        signal: controller.signal,`);
+    out.push(`      });`);
+    out.push(`      if (!res.ok) {`);
+    out.push(`        if (res.status === 401 || res.status === 403) {`);
+    out.push(`          status = 'closed';`);
+    out.push(`          return;`);
+    out.push(`        }`);
+    out.push(`        scheduleReconnect();`);
+    out.push(`        return;`);
+    out.push(`      }`);
+    out.push(`      status = 'connected';`);
+    out.push(`      reconnectAttempt = 0;`);
+    out.push(`      const reader = res.body?.getReader();`);
+    out.push(`      if (!reader) return;`);
+    out.push(`      const decoder = new TextDecoder('utf-8');`);
+    out.push(`      let streamBuffer = '';`);
+    out.push(`      let currentEventName = 'message';`);
+    out.push(`      const currentDataLines: string[] = [];`);
+    out.push(`      let currentId: string | undefined = undefined;`);
+    out.push(`      while (true) {`);
+    out.push(`        const { done, value } = await reader.read();`);
+    out.push(`        if (done) break;`);
+    out.push(`        streamBuffer += decoder.decode(value, { stream: true });`);
+    out.push(`        const lines = streamBuffer.split(/\\r\\n|\\r|\\n/);`);
+    out.push(`        streamBuffer = lines.pop() ?? '';`);
+    out.push(`        for (const line of lines) {`);
+    out.push(`          if (line === '') {`);
+    out.push(`            if (currentDataLines.length > 0) {`);
+    out.push(`              const rawData = currentDataLines.join('\\n');`);
+    out.push(`              let parsed: unknown = rawData;`);
+    out.push(`              try { parsed = JSON.parse(rawData); } catch { /* non-JSON fallback */ }`);
+    out.push(`              const handlers = topicHandlers.get(currentEventName);`);
+    out.push(`              if (handlers !== undefined) {`);
+    out.push(`                for (const handler of Array.from(handlers)) {`);
+    out.push(`                  try { handler(parsed); } catch { /* handler error */ }`);
+    out.push(`                }`);
+    out.push(`              }`);
+    out.push(`            }`);
+    out.push(`            if (currentId !== undefined) lastEventId = currentId;`);
+    out.push(`            currentEventName = 'message';`);
+    out.push(`            currentDataLines.length = 0;`);
+    out.push(`            currentId = undefined;`);
+    out.push(`          } else if (line.startsWith(':')) {`);
+    out.push(`            // heartbeat`);
+    out.push(`          } else if (line.startsWith('event:')) {`);
+    out.push(`            currentEventName = line.slice(line.startsWith('event: ') ? 7 : 6).trim();`);
+    out.push(`          } else if (line.startsWith('data:')) {`);
+    out.push(`            currentDataLines.push(line.slice(line.startsWith('data: ') ? 6 : 5));`);
+    out.push(`          } else if (line.startsWith('id:')) {`);
+    out.push(`            currentId = line.slice(line.startsWith('id: ') ? 4 : 3).trim();`);
+    out.push(`          }`);
+    out.push(`        }`);
+    out.push(`      }`);
+    out.push(`      if (!controller.signal.aborted) scheduleReconnect();`);
+    out.push(`    } catch {`);
+    out.push(`      if (!controller.signal.aborted && !isDisposed && status !== 'closed') {`);
+    out.push(`        scheduleReconnect();`);
+    out.push(`      }`);
+    out.push(`    }`);
+    out.push(`  };`);
+    out.push(``);
+    out.push(`  const triggerConnect = (): void => {`);
+    out.push(`    if (connectScheduled || isDisposed || status === 'closed') return;`);
+    out.push(`    connectScheduled = true;`);
+    out.push(`    queueMicrotask(() => {`);
+    out.push(`      connectScheduled = false;`);
+    out.push(`      const currentKey = getActiveTopics().join(',');`);
+    out.push(`      if (status === 'connected' && currentKey === connectedTopicsKey) return;`);
+    out.push(`      void connect();`);
+    out.push(`    });`);
+    out.push(`  };`);
+    out.push(``);
+    out.push(`  const client: EventBridgeClient<TEvents> = {`);
+    out.push(`    get status(): EventBridgeState { return status; },`);
+    out.push(`    get isDisposed(): boolean { return isDisposed; },`);
+    out.push(`    on<K extends keyof TEvents>(topic: K | string, handler: (payload: TEvents[K]) => void): () => void {`);
+    out.push(`      if (isDisposed) throw new Error('[EventBridgeClient] Cannot subscribe: client is disposed');`);
+    out.push(`      const topicStr = String(topic);`);
+    out.push(`      let handlers = topicHandlers.get(topicStr);`);
+    out.push(`      if (handlers === undefined) {`);
+    out.push(`        handlers = new Set();`);
+    out.push(`        topicHandlers.set(topicStr, handlers);`);
+    out.push(`      }`);
+    out.push(`      handlers.add(handler as (payload: unknown) => void);`);
+    out.push(`      triggerConnect();`);
+    out.push(`      return () => {`);
+    out.push(`        const set = topicHandlers.get(topicStr);`);
+    out.push(`        if (set !== undefined) {`);
+    out.push(`          set.delete(handler as (payload: unknown) => void);`);
+    out.push(`          if (set.size === 0) topicHandlers.delete(topicStr);`);
+    out.push(`        }`);
+    out.push(`      };`);
+    out.push(`    },`);
+    out.push(`    close(): void {`);
+    out.push(`      isDisposed = true;`);
+    out.push(`      status = 'closed';`);
+    out.push(`      if (reconnectTimer !== undefined) { clearTimeout(reconnectTimer); reconnectTimer = undefined; }`);
+    out.push(`      if (abortController !== null) { abortController.abort(); abortController = null; }`);
+    out.push(`      topicHandlers.clear();`);
+    out.push(`    },`);
+    out.push(`    dispose(): void {`);
+    out.push(`      this.close();`);
+    out.push(`    },`);
+    out.push(`  };`);
+    out.push(`  return client;`);
+    out.push(`}`);
+    out.push(``);
+
     // Emit ApiClient interface
     out.push(`export interface ApiClient {`);
+    out.push(`  readonly events: EventBridgeClient<EventMap>;`);
     for (const [domain, domainContracts] of byDomain.entries()) {
         out.push(`  readonly ${domain}: {`);
         for (const contract of domainContracts) {
@@ -292,10 +569,13 @@ export function generateClient(
     out.push(`export function createApiClient(options: ApiClientOptions = {}): ApiClient {`);
     out.push(`  const baseUrl = options.baseUrl ?? ${JSON.stringify(options?.baseUrl ?? DEFAULT_BASE_PATH)};`);
     out.push(`  const customFetch = options.fetch ?? globalThis.fetch;`);
+    out.push(`  const events = createEventBridgeClient<EventMap>(options);`);
     out.push(``);
     out.push(`  return {`);
+    out.push(`    events,`);
 
     for (const [domain, domainContracts] of byDomain.entries()) {
+
         out.push(`    ${domain}: {`);
         for (const contract of domainContracts) {
             const inputTypeName = `${toPascalCase(contract.domain)}${toPascalCase(contract.action)}Input`;

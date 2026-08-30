@@ -22,5 +22,8 @@ import type { ILogger } from '@flybyme/mesh';
  */
 export interface ExposureBroker {
     call(tool: string, params: unknown, options?: { meta?: Record<string, unknown> }): Promise<unknown>;
+    on?(event: string, handler: (payload: unknown, packet?: unknown) => void): (() => void) | void;
+    off?(event: string, handler: (payload: unknown, packet?: unknown) => void): void;
     readonly logger: ILogger;
 }
+
