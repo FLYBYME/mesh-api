@@ -98,6 +98,60 @@ real OIDC earns its complexity, and it can be added under the same seam.
 sessions are, and they cover every consumer that exists today. The exchange endpoint lands with the
 first real federated deployment, and the shape above is what it will be.
 
+## Multi-tenancy: `mesh-api` is the public boundary, so it owns org scoping
+
+**Decided 2026-08-29.** In the PaaS deployment, `mesh-api` replaces `platform/api-edge` as the
+public HTTP entrance. That makes org scoping this package's problem, and the three-level
+`auth: 'public' | 'user' | 'admin'` is not sufficient for it.
+
+What `api-edge` does today, and what has to survive the transition:
+
+1. Resolve the caller's principal **and** their organization from the credential.
+2. If the request names a *different* org, refuse it unless the caller is an operator. A member of
+   org A passing `orgId: B` must be rejected, not served.
+3. Resolve that principal's **effective permissions within that specific org** — permissions are
+   per-org, not global — and glob-match against a permission key declared per exposed contract.
+4. Inject the resolved org into the call so handlers cannot be tricked by a caller-supplied one.
+
+Point 3 is why the current `auth` enum is inadequate: a closed set of three levels cannot express
+`dns.record_create` requiring `dns.write` *in the org that owns the zone*.
+
+### The shape that keeps this package generic
+
+`mesh-api` must not learn about organizations. A weather microservice has none, and hard-coding a
+tenancy model into the framework would make it PaaS infrastructure rather than a general package —
+the failure `00-overview.md` explicitly warns against.
+
+So the exposure entry carries a **permission key**, and the *resolution* is a hook the application
+provides:
+
+```ts
+mountWeb({
+  expose: [
+    { contract: dnsRecordCreateContract, permission: 'dns.write' },
+  ],
+  authorize: async ({ principal, requestedScope, permission }) => { ... },  // app-supplied
+});
+```
+
+The framework owns the boundary, the sequencing, and the guarantee that nothing unlisted is
+reachable. The application owns what a principal is allowed to do. PaaS plugs in its existing
+role/permission resolution; a service with no tenancy model supplies nothing and gets the simple
+behaviour.
+
+### This supersedes an earlier decision in this spec
+
+`roadmap.md` recorded "Authorization scope: the public boundary only" on the reasoning that the
+framework-wide permission design (paas B15) was a separate mesh-core project. That reasoning held
+while `api-edge` was the public entrance and `mesh-api` was one of several clients. Once `mesh-api`
+*is* the entrance, deferring means shipping a public API with a weaker authorization model than the
+thing it replaces.
+
+**Note also that per-handler tenancy is enforced by convention, not construction.** In PaaS today
+`DatabaseMiddleware` has no notion of org, so a raw `site.find({ query: {} })` returns every site in
+every organization. The boundary check is therefore load-bearing, not defence in depth — there is
+currently no second layer beneath it.
+
 ## System callers
 
 Some backend work legitimately acts as the service itself, not as a user — a cron sweep, a reconciler, a pipeline stage writing storage. The PaaS codebase has this gap on record today: `email/receive` fabricates storage refs and discards real bytes because `s3.object_put` requires an end-user bearer token and no first-party caller pattern exists (`spec/roadmap/future.md` B3), and it is flagged there as likely to recur elsewhere.
