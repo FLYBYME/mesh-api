@@ -22,6 +22,17 @@ export { WebServiceModule } from './exposure/WebServiceModule.js';
 export { mountRest, type MountRestOptions } from './exposure/rest.js';
 export { toHttpError, type HttpErrorBody } from './exposure/errors.js';
 export { coerceToSchema, objectShapeOf, formatZodError } from './exposure/input.js';
+export {
+    unwrapSchema,
+    isFieldOptional,
+    isInputEmptyOrAllOptional,
+    getObjectShape,
+    getEnumOptions,
+    getZodTypeName,
+    classifyFormField,
+    type UnwrappedSchema,
+    type FormFieldClassification,
+} from './exposure/schema.js';
 
 // Authentication & Session
 export type {

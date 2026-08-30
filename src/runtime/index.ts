@@ -47,6 +47,11 @@ export type {
     SpinnerProps,
     EmptyStateProps,
     ErrorStateProps,
+    FormProps,
+    FormContractLike,
+    TableProps,
+    TableColumn,
+    TableColumnProp,
 } from './dom/index.js';
 export {
     h,
@@ -72,6 +77,8 @@ export {
     Spinner,
     EmptyState,
     ErrorState,
+    Form,
+    Table,
 } from './dom/index.js';
 
 // App Runtime & Compositor

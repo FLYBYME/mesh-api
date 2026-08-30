@@ -24,28 +24,7 @@ function toPascalCase(str: string): string {
         .join('');
 }
 
-function isFieldOptional(schema: unknown): boolean {
-    if (!(schema instanceof z.ZodType)) return false;
-    if (schema instanceof z.ZodOptional) return true;
-    if (schema instanceof z.ZodDefault) return true;
-    if (schema instanceof z.ZodEffects) return isFieldOptional(schema.innerType());
-    if (schema instanceof z.ZodReadonly) return isFieldOptional(schema.unwrap());
-    return false;
-}
-
-function isInputEmptyOrAllOptional(schema: unknown): boolean {
-    if (!(schema instanceof z.ZodType)) return true;
-    if (schema instanceof z.ZodVoid || schema instanceof z.ZodUndefined) return true;
-    if (schema instanceof z.ZodOptional || schema instanceof z.ZodDefault) return true;
-    if (schema instanceof z.ZodEffects) return isInputEmptyOrAllOptional(schema.innerType());
-    if (schema instanceof z.ZodReadonly) return isInputEmptyOrAllOptional(schema.unwrap());
-    if (schema instanceof z.ZodObject) {
-        const entries = Object.entries(schema.shape);
-        if (entries.length === 0) return true;
-        return entries.every(([, field]) => isFieldOptional(field));
-    }
-    return false;
-}
+import { isFieldOptional, isInputEmptyOrAllOptional, getZodTypeName } from '../exposure/schema.js';
 
 /**
  * Walks a Zod schema and emits the corresponding TypeScript type string.
@@ -183,7 +162,7 @@ export function zodTypeToTs(schema: unknown, ctx: CodegenContext): string {
         return 'unknown';
     }
 
-    const typeName = schema.constructor?.name || 'ZodType';
+    const typeName = getZodTypeName(schema);
     const fieldLoc = ctx.path.length > 0 ? `${ctx.toolKey}.${ctx.path.join('.')}` : ctx.toolKey;
     console.warn(`[mesh-api codegen] Unsupported Zod type '${typeName}' at ${fieldLoc}; emitted 'unknown'`);
     return 'unknown';

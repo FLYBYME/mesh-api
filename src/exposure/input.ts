@@ -1,4 +1,5 @@
 import { z } from '@flybyme/mesh';
+import { unwrapSchema, getObjectShape } from './schema.js';
 
 /**
  * Path params and query strings are always strings -- HTTP has no other type. A contract that
@@ -11,14 +12,17 @@ import { z } from '@flybyme/mesh';
  * Anything the schema does not describe as a number/boolean/array is passed through untouched.
  */
 export function coerceToSchema(schema: z.ZodTypeAny, input: Record<string, unknown>): Record<string, unknown> {
-    const shape = objectShapeOf(schema);
+    const shape = getObjectShape(schema);
     if (!shape) return input;
 
     const out: Record<string, unknown> = { ...input };
     for (const [key, value] of Object.entries(input)) {
         const field = shape[key];
         if (!field) continue;
-        out[key] = coerceValue(unwrap(field), value);
+        const unwrapped = unwrapSchema(field);
+        if (unwrapped) {
+            out[key] = coerceValue(unwrapped.inner, value);
+        }
     }
     return out;
 }
@@ -28,7 +32,8 @@ function coerceValue(field: z.ZodTypeAny, value: unknown): unknown {
         // `?tag=a&tag=b` already arrives as an array; `?tag=a` arrives as a scalar. A contract
         // asking for an array should get one either way.
         const items = Array.isArray(value) ? value : [value];
-        const element = unwrap(field.element as z.ZodTypeAny);
+        const elementUnwrapped = unwrapSchema(field.element);
+        const element = elementUnwrapped ? elementUnwrapped.inner : field.element;
         return items.map(item => coerceValue(element, item));
     }
     if (typeof value !== 'string') return value;
@@ -46,28 +51,9 @@ function coerceValue(field: z.ZodTypeAny, value: unknown): unknown {
     return value;
 }
 
-/** Peels optional/nullable/default wrappers to reach the type that actually describes the value. */
-function unwrap(schema: z.ZodTypeAny): z.ZodTypeAny {
-    let current = schema;
-    for (let i = 0; i < 10; i++) {
-        if (current instanceof z.ZodOptional || current instanceof z.ZodNullable) {
-            current = current.unwrap() as z.ZodTypeAny;
-        } else if (current instanceof z.ZodDefault) {
-            current = current.removeDefault() as z.ZodTypeAny;
-        } else {
-            return current;
-        }
-    }
-    return current;
-}
-
 /** Returns the field map of an object schema, or undefined if the schema is not an object. */
 export function objectShapeOf(schema: z.ZodTypeAny): Record<string, z.ZodTypeAny> | undefined {
-    const inner = unwrap(schema);
-    if (inner instanceof z.ZodObject) {
-        return inner.shape as Record<string, z.ZodTypeAny>;
-    }
-    return undefined;
+    return getObjectShape(schema);
 }
 
 /**

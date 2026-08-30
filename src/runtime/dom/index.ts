@@ -31,6 +31,8 @@ export {
     Spinner,
     EmptyState,
     ErrorState,
+    Form,
+    Table,
     type StackProps,
     type RowProps,
     type TextProps,
@@ -42,4 +44,9 @@ export {
     type SpinnerProps,
     type EmptyStateProps,
     type ErrorStateProps,
+    type FormProps,
+    type FormContractLike,
+    type TableProps,
+    type TableColumn,
+    type TableColumnProp,
 } from './components/index.js';

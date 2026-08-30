@@ -1,0 +1,95 @@
+You are working in /home/ubuntu/code/mesh-api.
+
+## The assignment
+
+Generate **forms and tables from contracts**. This is the multiplier that decides whether the
+platform's management UIs are five manifest entries or five bespoke apps that drift apart.
+
+Read first:
+  spec/06-components.md   (the component model; the forms paragraph near the end)
+  spec/05-reactivity.md   (signals — the substrate; effects are microtask-scheduled)
+  spec/01-exposure.md     (contracts are the single source of truth)
+  spec/08-data.md         (`resource`, and how an App talks to the backend)
+
+## Why this exists
+
+Four of the five UIs this platform needs — domain, site, storage and email management — are CRUD
+over contracts that already exist (~46 of them across `domain`, `site`, `storage`, `dns`, `proxy`,
+`addon`). Built by hand, each one re-implements form validation, and each drifts from the server
+differently.
+
+`spec/06-components.md` already states the goal: a form generated from a contract has correct
+types, correct required/optional handling, and *"validation that matches the server exactly —
+because it **is** the server's schema."* Build that.
+
+## What to build, in `src/runtime/dom/`
+
+### 1. `Form({ contract, onSubmit, initial? })`
+
+Renders a real `<form>` from a contract's `inputSchema`, one field per property.
+
+- **Field type comes from the zod type**: string → text input, number → number input, boolean →
+  checkbox, enum/union-of-literals → select, date → date input, array → repeatable group, nested
+  object → fieldset. Anything unsupported must render a clearly-labelled disabled control and log a
+  warning naming the field — never silently omit it, because a silently missing field submits
+  incomplete data that looks fine.
+- **Optional vs required** comes from the schema (`ZodOptional`, `ZodDefault`), not a separate
+  prop. `.describe()` text becomes the field's help text — this codebase describes every field, so
+  that is free documentation.
+- **Validation is the contract's own schema.** `safeParse` on submit, and per-field on blur. Map
+  `ZodError.issues[].path` back to the field that produced it. Do **not** write a second validation
+  layer or re-declare rules — the point is that client and server cannot disagree.
+- Submit is disabled while invalid or in flight, and a server-side failure (`{ error: { code,
+  message } }`) is surfaced against the form, mapped to a field where the error names one.
+
+### 2. `Table({ rows, columns?, key })`
+
+- `rows` is a signal or `resource` — the table updates fine-grained, never rebuilding.
+- With no `columns`, derive them from the row shape; with `columns`, respect the given order and
+  labels.
+- **Keyed by `key`**, built on the existing `For`, so a re-sort or a filter *moves* rows rather
+  than recreating them. Prove it: hold a reference to a row's DOM node, re-sort, assert the same
+  node object is present at its new index. That property is why this framework exists.
+- Sorting and filtering are signals over the data, not DOM operations.
+- No virtualisation yet. Say so in your summary; it is Phase 6 and needed only for large sets.
+
+### 3. Reuse, do not reinvent
+
+`src/cli/generate-client.ts` already walks zod schemas to emit TypeScript types, and knows exactly
+which types it supports and which it cannot. **Read it first.** Where the same knowledge is needed
+here, extract it into a shared helper rather than writing a second walker that will disagree with
+the first — two schema walkers drifting apart is precisely the bug class this whole feature exists
+to prevent.
+
+## Rules
+
+- **Do not `git commit`.** Leave the work in the working tree.
+- **Zero `as any` / `as unknown as` / `as never`.** Absolute. Walking zod will tempt you
+  repeatedly — use zod's own `instanceof` guards and narrow honestly. If a type genuinely cannot be
+  expressed, say so in your summary rather than casting.
+- No new dependencies.
+- **DOM test files need `// @vitest-environment happy-dom` at the top.** Vitest 4 removed
+  `environmentMatchGlobs`; a file without the docblock silently has no `document`.
+- **Effects are microtask-scheduled.** A write followed immediately by a DOM assertion tests the
+  scheduler, not your code — call `flushSync()`.
+- `npm run typecheck` (covers `src` AND `test`) and `npx vitest run` must pass, with all 186
+  existing tests still green.
+- Comments explain *why*. House style: `src/exposure/broker.ts`, `src/runtime/dom/h.ts`.
+
+## Verification
+
+`test/dom/` with the docblock. The cases that matter:
+
+  - a required field left empty blocks submit, and the message comes from the contract's own schema
+  - a field whose zod type is unsupported renders visibly disabled and warns, rather than vanishing
+  - optional and defaulted fields are not marked required
+  - a server error naming a field lands on that field
+  - **re-sorting a table moves row nodes rather than recreating them** — assert node identity
+  - editing one cell's bound value updates exactly that node and leaves siblings identical
+
+## Finish by printing
+
+  1. Each file created, one line each.
+  2. Every zod type Form supports, and every one it does not.
+  3. What you extracted to share with `generate-client.ts`, and what you deliberately left separate.
+  4. Anything in spec/06 that was wrong or unbuildable as written.
