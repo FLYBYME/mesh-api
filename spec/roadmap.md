@@ -45,9 +45,41 @@ Verified independently (`test/dom/independent-verification.test.ts`) on the prop
 - [ ] **Router.** History API, app-level then view-level, params/query as signals, scroll and focus restoration.
 - [ ] **Manifest.** Zod-validated YAML, load strategies, auth gating, environment overlays.
 
-### Phase 4 — kanban, for real
+### Phase 4 — a real consumer
 
-- [ ] Rebuild the kanban UI on the framework per `11-example-kanban.md`, and **use it daily** to track agy dispatches. Gaps surface by being lived with, not by being reviewed.
+- [x] **Form and table generation from contracts** (2026-08-30). `Form` derives field type, required/optional and help text from a contract's `inputSchema` and validates with that same schema, so client and server cannot disagree. `Table` builds on the keyed `For`. Both verified by asserting **node identity** across sort and filter, not rendered text — the only way to tell updating a node from replacing it with an equal one. An unsupported zod type renders a visibly disabled control and warns; a silently omitted field submits incomplete data that looks fine.
+- [x] **Domain management app** (2026-08-30) — `apps/`, `manifest.yaml`, `test/apps/`. The first thing to ever use this framework.
+- [ ] Rebuild the kanban UI on the framework per `11-example-kanban.md`, and **use it daily**.
+
+#### What the first consumer found — fix these before building more apps
+
+Eight gaps, none catchable by the existing tests, because the runtime suites *construct* contexts
+and never *consume* one the way an app does. Ordered by severity.
+
+1. **`AppContext` has no `ctx.router` and no `ctx.api`.** Specs 07, 08 and 11 all state that every
+   app receives them. `src/runtime/app/types.ts:120-128` exposes only `appId`, `state`, `status`,
+   `requestSurface`, `registerCleanup`, `trackLeakable`. The app had to take a router and API client
+   through factory functions instead. **This is the framework's central promise — an app gets its
+   context and everything it needs is on it — currently unmet.** Fix first; every later app inherits
+   the workaround otherwise.
+2. **`SurfaceDefinition` does not support `views`**, which `07-routing.md` describes as how an app
+   routes within its own subtree.
+3. **`AppStateContainer` lacks store helpers** (`.set()`/`.get()`), so per-app state is more awkward
+   than the spec implies.
+4. **The component catalogue in `06-components.md` does not match what exists.** The spec lists a
+   set; the code ships a different one. Reconcile the doc to reality rather than the reverse — the
+   small set was a deliberate decision.
+5. **`Badge` has no reactive variant binding**, so its variant cannot follow a signal.
+6. **`Table` cell typing is weaker than it needs to be.**
+7. **Microtask reactivity interacts awkwardly with async `resource` timing** — worth a documented
+   pattern, since every consumer will hit it.
+8. **No SSE client**, though `08-data.md` and `11-example-kanban.md` both promise live updates
+   (`ctx.api.events.on(...)`). That is Phase 5 work, but the specs promise it now.
+
+The pattern worth remembering: **every real defect in this package has come from a consumer running
+it**, never from review or from its own tests — an MCP transport that 500s on the *second* request,
+a `.css` import that crashes Node at startup, a base path that 404s against its own server, and now
+these eight.
 
 ### Phase 5 — the network layer
 
