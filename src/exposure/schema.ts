@@ -1,4 +1,7 @@
-import { z } from '@flybyme/mesh';
+// zod directly, not the mesh root. This module is pure schema introspection and is imported by the
+// browser `Form` component — a value import of `@flybyme/mesh` here reaches ContextStack, the
+// Supervisor and express, and drags the whole server into every console bundle. Same instance.
+import { z } from 'zod';
 
 /**
  * Metadata produced by unwrapping Zod wrapper types (Optional, Nullable, Default, Effects, etc.).
