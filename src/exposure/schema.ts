@@ -1,7 +1,14 @@
-// zod directly, not the mesh root. This module is pure schema introspection and is imported by the
-// browser `Form` component — a value import of `@flybyme/mesh` here reaches ContextStack, the
-// Supervisor and express, and drags the whole server into every console bundle. Same instance.
-import { z } from 'zod';
+// `@flybyme/mesh/contracts`, not `zod` and not the mesh root.
+//
+// It has to be the framework's zod: this module classifies schemas with `instanceof z.ZodObject`,
+// and `instanceof` compares constructor identity — so a schema built by one copy of zod fails every
+// check made by another. That is how a form once rendered its submit button and no fields at all,
+// throwing nothing.
+//
+// It also cannot be the mesh *root*, which reaches ContextStack, the Supervisor and express and
+// drags the whole server into any browser bundle that touches a Form. `/contracts` is the entry
+// that is both: this package's zod, and safe to bundle.
+import { z } from '@flybyme/mesh/contracts';
 
 /**
  * Metadata produced by unwrapping Zod wrapper types (Optional, Nullable, Default, Effects, etc.).

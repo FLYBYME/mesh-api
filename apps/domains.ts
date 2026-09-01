@@ -47,7 +47,10 @@ export interface DomainRecord extends DomainInput {
     updatedAt?: Date;
 }
 
-export const domainCrud = defineCrud('domain', DomainSchema);
+// `dependencies` is required since mesh 2.0 — a CRUD set declares what it calls, because that is
+// scheduler input rather than documentation. Empty is a real answer here and the correct one: this
+// example's collections call nothing, and its UI reaches them through the generated client.
+export const domainCrud = defineCrud('domain', DomainSchema, { dependencies: [] });
 
 // --- DNS Record Schema & Types (from /home/ubuntu/code/paas/src/dns/dns.schema.ts) ---
 
@@ -79,7 +82,7 @@ export interface DnsRecordItem extends DnsRecordInput {
     updatedAt?: Date;
 }
 
-export const dnsRecordCrud = defineCrud('dnsRecord', DnsRecordSchema);
+export const dnsRecordCrud = defineCrud('dnsRecord', DnsRecordSchema, { dependencies: [] });
 
 // --- API Client Interface ---
 
