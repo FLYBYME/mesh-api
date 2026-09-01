@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from '@flybyme/mesh/contracts';
 
 /**
  * Closed set of surface roles validated per spec/03.
