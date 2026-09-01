@@ -9,5 +9,5 @@ export { Badge, type BadgeProps, type BadgeVariant } from './Badge.js';
 export { Spinner, type SpinnerProps } from './Spinner.js';
 export { EmptyState, type EmptyStateProps } from './EmptyState.js';
 export { ErrorState, type ErrorStateProps } from './ErrorState.js';
-export { Form, type FormProps, type FormContractLike } from './Form.js';
+export { Form, type FormProps, type FormContractLike, type StringInputType } from './Form.js';
 export { Table, type TableProps, type TableColumn, type TableColumnProp } from './Table.js';
