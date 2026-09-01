@@ -58,11 +58,12 @@ export class AppInstance<TApi = unknown> {
             // Evaluate static background surfaces declared on the App definition
             if (this.definition.surfaces) {
                 for (const surfaceDef of this.definition.surfaces) {
-                    if (surfaceDef.role === 'background') {
+                    if (surfaceDef.role === 'background' || surfaceDef.slot !== undefined) {
                         const res = await this.compositor.requestSurface(
                             this.id,
                             {
-                                role: 'background',
+                                role: surfaceDef.role,
+                                slot: surfaceDef.slot,
                                 mount: surfaceDef.mount
                                     ? (el) => surfaceDef.mount!(el, this.ctx)
                                     : undefined,
@@ -96,7 +97,7 @@ export class AppInstance<TApi = unknown> {
                 // Mount declared static visual surfaces
                 if (this.definition.surfaces) {
                     for (const surfaceDef of this.definition.surfaces) {
-                        if (surfaceDef.role !== 'background') {
+                        if (surfaceDef.role !== 'background' && surfaceDef.slot === undefined) {
                             const res = await this.compositor.requestSurface(
                                 this.id,
                                 {

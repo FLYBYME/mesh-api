@@ -12,6 +12,7 @@ interface SurfaceRecord {
     readonly id: string;
     readonly appId: string;
     readonly role: SurfaceRole;
+    readonly slot?: string;
     readonly container: HTMLElement;
     readonly parentElement: HTMLElement;
     readonly nextSibling: Node | null;
@@ -195,6 +196,7 @@ export class Compositor {
             id: surfaceId,
             appId,
             role: 'page',
+            slot: request.slot,
             container,
             parentElement: contentRegionEl,
             nextSibling: container.nextSibling,
@@ -261,6 +263,7 @@ export class Compositor {
             id: surfaceId,
             appId,
             role: 'panel',
+            slot: request.slot,
             container,
             parentElement: targetEl,
             nextSibling: container.nextSibling,
@@ -329,6 +332,7 @@ export class Compositor {
             id: surfaceId,
             appId,
             role: 'banner',
+            slot: request.slot,
             container,
             parentElement: this.bannerHost,
             nextSibling: null,
@@ -434,6 +438,7 @@ export class Compositor {
             id: surfaceId,
             appId,
             role: 'popup',
+            slot: request.slot,
             container,
             parentElement: this.popupHost,
             nextSibling: null,
@@ -553,6 +558,7 @@ export class Compositor {
             id: surfaceId,
             appId,
             role: 'overlay',
+            slot: request.slot,
             container,
             parentElement: this.overlayHost,
             nextSibling: null,
@@ -596,6 +602,7 @@ export class Compositor {
             id: surfaceId,
             appId,
             role: 'background',
+            slot: request.slot,
             container: dummyContainer,
             parentElement: dummyContainer,
             nextSibling: null,
@@ -643,7 +650,7 @@ export class Compositor {
         }
 
         for (const record of this.surfaceRecords.values()) {
-            if (record.appId === appId && record.role !== 'background' && record.isAttached) {
+            if (record.appId === appId && record.role !== 'background' && record.slot === undefined && record.isAttached) {
                 if (record.container.parentNode !== null) {
                     record.container.remove();
                 }
@@ -659,7 +666,7 @@ export class Compositor {
      */
     restoreAppSurfaces(appId: string): void {
         for (const record of this.surfaceRecords.values()) {
-            if (record.appId === appId && record.role !== 'background' && !record.isAttached) {
+            if (record.appId === appId && record.role !== 'background' && record.slot === undefined && !record.isAttached) {
                 if (record.parentElement !== null) {
                     if (record.nextSibling !== null && record.parentElement.contains(record.nextSibling)) {
                         record.parentElement.insertBefore(record.container, record.nextSibling);
