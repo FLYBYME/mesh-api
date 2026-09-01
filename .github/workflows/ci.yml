@@ -1,0 +1,103 @@
+name: CI
+
+# This package had no workflow at all until now: its 229 tests only ever ran when someone ran them
+# by hand. That became a real gap when it started shipping compiled output from `dist/` that three
+# downstream packages resolve their types through — nothing verified that build before a merge.
+#
+# Require this one in the branch protection rule for master.
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    # No MongoDB service, deliberately.
+    #
+    # mesh's workflow runs one because 71 of its tests talk to a real database. Nothing in this
+    # package's suite does. Copying the service across would add a minute to every run and verify
+    # nothing, and a step that exists because another repo has it is the kind nobody removes later.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+
+      # `npm install`, not `npm ci`: there is no committed lockfile, and `prepare` runs the build
+      # on install — so a failure here is already a build failure worth seeing.
+      - run: npm install
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      # The build is two steps — `tsc`, then `copy-assets.js` for the CSS the runtime imports for
+      # real. `tsc` does not copy stylesheets, so if that second step silently stops running the
+      # build still "succeeds" and every consumer's page loses its styling. Assert the artifacts
+      # rather than trusting the exit code.
+      - name: Verify the published artifacts exist
+        run: |
+          set -euo pipefail
+          for f in dist/index.js dist/index.d.ts dist/runtime/index.js dist/runtime/index.d.ts; do
+            test -f "$f" || { echo "MISSING: $f"; exit 1; }
+          done
+          count=$(find dist/runtime/dom -name '*.css' | wc -l)
+          echo "component stylesheets in dist: $count"
+          test "$count" -gt 0 || { echo "MISSING: no CSS copied into dist/"; exit 1; }
+
+      - name: Test
+        run: npm test
+
+      # The check this package most needed and least had.
+      #
+      # `@flybyme/mesh-api/runtime` is the BROWSER half. Three separate value imports have leaked
+      # across that boundary into the server half — ADMIN_ROLE from auth/gate.ts, and `z` from the
+      # mesh package root in both Form.ts and exposure/schema.ts — each dragging express, mongodb
+      # and ws into anything bundling this entry. All three compiled perfectly. All three were
+      # found by a human building a console downstream, one layer at a time.
+      #
+      # Bundling for a browser is the only thing that sees them, because the failure is in module
+      # resolution rather than in types.
+      - name: Bundle the browser entry for a browser
+        run: |
+          set -euo pipefail
+          npx --yes esbuild@0.28.2 src/runtime/index.ts \
+            --bundle --platform=browser --format=esm \
+            --external:zod \
+            --outfile=/tmp/runtime-bundle-check.js
+          echo "bundled: $(wc -c < /tmp/runtime-bundle-check.js) bytes"
+
+      # `bin` pointed at a raw .ts file with no shebang, so `npx mesh-api-generate-client` failed
+      # with `import: not found`. The fix pointed it at the built .js — and it then exited 0 having
+      # done nothing, because its is-main guard compared a symlink path against a resolved one.
+      #
+      # Both passed a check that the file existed where `bin` said. Existence was never the property
+      # that mattered: invoke it, and require it to behave like a CLI with no arguments.
+      # Invoked through a SYMLINK, because that is the case that broke and the only one that would
+      # have caught it. Running `node dist/cli/generate-client.js` by path passes either way.
+      #
+      # npm installs a bin as a symlink into the consumer's `node_modules/.bin` and sets the
+      # executable bit on the target. Neither happens in this repo — npm links dependencies' bins,
+      # not the root package's, and `tsc` emits without the exec bit — so both are reproduced here.
+      - name: The bin runs
+        run: |
+          set -euo pipefail
+          chmod +x dist/cli/generate-client.js
+          mkdir -p /tmp/binshim
+          ln -sf "$PWD/dist/cli/generate-client.js" /tmp/binshim/mesh-api-generate-client
+
+          out=$(/tmp/binshim/mesh-api-generate-client 2>&1) && status=0 || status=$?
+          echo "$out"
+          test "$status" -ne 0 || { echo "FAIL: exited 0 with no arguments — it should print usage and fail"; exit 1; }
+          echo "$out" | grep -q "Usage:" || { echo "FAIL: no usage output"; exit 1; }
