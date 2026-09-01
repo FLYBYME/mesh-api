@@ -49,6 +49,7 @@ export type {
     EmptyStateProps,
     ErrorStateProps,
     FormProps,
+    StringInputType,
     FormContractLike,
     TableProps,
     TableColumn,

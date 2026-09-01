@@ -1,4 +1,4 @@
-import { z } from '@flybyme/mesh';
+import { z } from 'zod';
 import { unwrapSchema, getObjectShape } from './schema.js';
 
 /**

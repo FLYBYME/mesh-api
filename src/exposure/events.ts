@@ -1,5 +1,5 @@
 import type { Router, Request, Response } from 'express';
-import { z } from '@flybyme/mesh';
+import { z } from 'zod';
 import type { ExposureBroker } from './broker.js';
 import type { EventExposeEntry, AuthLevel } from './types.js';
 import type { AuthorizeHook, AuthorizeInput } from '../auth/types.js';

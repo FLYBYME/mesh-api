@@ -1,6 +1,7 @@
 import YAML from 'yaml';
 import type { SessionUser } from '../../auth/types.js';
-import { ADMIN_ROLE } from '../../auth/gate.js';
+// `roles.js`, not `gate.js`: this is browser code, and gate.ts imports the whole server half.
+import { ADMIN_ROLE } from '../../auth/roles.js';
 import type { AppHost, LayoutPolicy } from '../app/types.js';
 import type { Manifest, ManifestAuthLevel } from './types.js';
 import { validateManifest, validateManifestOverlay } from './validate.js';
