@@ -2,8 +2,11 @@ import { MeshError, toolKey, type ToolContract, type z } from '@flybyme/mesh';
 import type { AuthLevel, ExposeEntry } from '../exposure/types.js';
 import type { SessionRecord, AuthorizeHook, AuthorizeInput } from './types.js';
 
-/** Role that satisfies `auth: 'admin'`. One name, checked in one place. */
-export const ADMIN_ROLE = 'admin';
+// Re-exported so every existing importer keeps working, but it is *defined* in `roles.ts`, which
+// imports nothing — the browser runtime needs this constant and must not drag this file in to get
+// it. See roles.ts for what that cost.
+export { ADMIN_ROLE } from './roles.js';
+import { ADMIN_ROLE } from './roles.js';
 
 /**
  * checkAuth: the coarse gate at the public boundary.
