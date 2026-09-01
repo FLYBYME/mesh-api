@@ -1,5 +1,8 @@
+#!/usr/bin/env node
 import fs from 'node:fs';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { z, type ToolContract, globalContractRegistry } from '@flybyme/mesh';
 
 import { CSRF_HEADER } from '../auth/session.js';
@@ -725,7 +728,35 @@ export async function runCli(argv: string[]): Promise<void> {
     generateClientToFile(contracts, outPath);
 }
 
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('generate-client.js')) {
+/**
+ * Is this module the entry point?
+ *
+ * Compared as real paths, because npm installs a bin as a **symlink**:
+ * `node_modules/.bin/mesh-api-generate-client -> ../@flybyme/mesh-api/dist/cli/generate-client.js`.
+ * Node reports `process.argv[1]` as the symlink it was invoked through while `import.meta.url` is
+ * the resolved file, so comparing them directly is false exactly when the CLI is used the way it
+ * is meant to be used:
+ *
+ *     argv1       = node_modules/.bin/mesh-api-generate-client
+ *     import.meta = .../dist/cli/generate-client.js
+ *
+ * The old guard also accepted any `argv[1]` ending `generate-client.js`, which covered running the
+ * file by path and hid the symlink case entirely. Between them the command exited 0 having done
+ * nothing — quieter than the `import: not found` it replaced, and worse, because a silent success
+ * is indistinguishable from a working one in a script.
+ */
+function isEntryPoint(): boolean {
+    const entry = process.argv[1];
+    if (entry === undefined) return false;
+    try {
+        return realpathSync(entry) === fileURLToPath(import.meta.url);
+    } catch {
+        // argv[1] is not a path we can resolve — a REPL, an eval, a deleted file. Not the entry.
+        return false;
+    }
+}
+
+if (isEntryPoint()) {
     runCli(process.argv.slice(2)).catch((err: unknown) => {
         console.error('Error generating client:', err);
         process.exit(1);
