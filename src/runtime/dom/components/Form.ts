@@ -35,6 +35,16 @@ export interface FormProps<TInput extends z.ZodTypeAny = z.ZodTypeAny> {
     class?: string | (() => string);
     id?: string | (() => string);
     ref?: (el: HTMLFormElement) => void;
+    /**
+     * Per-field `<input type>` overrides, keyed by field path.
+     *
+     * Only for what a schema cannot say. `email` and `url` are read from zod's own checks and need
+     * no entry here; `password` has no zod equivalent, because it changes nothing about the value —
+     * only whether the browser shows it, offers to save it, or keeps it out of an autofill heuristic.
+     *
+     *     Form({ contract, fieldTypes: { password: 'password' }, onSubmit })
+     */
+    fieldTypes?: Readonly<Record<string, StringInputType>>;
 }
 
 interface FormFieldContext {
@@ -44,6 +54,40 @@ interface FormFieldContext {
     readonly clearFieldError: (path: string) => void;
     readonly validateField: (path: string) => void;
     readonly uniquePrefix: string;
+    readonly fieldTypes?: Readonly<Record<string, StringInputType>>;
+}
+
+/**
+ * The `type` a string field's `<input>` may take.
+ *
+ * Every string field used to render `type="text"`, which is wrong in two ways that matter. A
+ * password field showed the password: readable over a shoulder, and no browser offers to save or
+ * warn about a credential it cannot recognise. An email field lost its on-screen keyboard on
+ * mobile and the browser's own format check.
+ */
+export type StringInputType = 'text' | 'password' | 'email' | 'search' | 'url' | 'tel';
+
+/**
+ * The input type zod already implies.
+ *
+ * `z.string().email()` records an `email` check, and `.url()` a `url` one, so the schema has
+ * already said what the field is. Reading it beats asking the caller to repeat themselves, and it
+ * cannot drift from the validation.
+ *
+ * Password has no zod equivalent — it is a presentation concern with no effect on the value — so
+ * it comes from `fieldTypes` and is never guessed from a field's name. Guessing would mean a field
+ * called `passwordResetUrl` silently becoming a password box.
+ */
+function inferStringInputType(schema: z.ZodString): StringInputType | undefined {
+    const checks: unknown = (schema as unknown as { _def?: { checks?: unknown } })._def?.checks;
+    if (!Array.isArray(checks)) return undefined;
+    for (const check of checks) {
+        if (typeof check !== 'object' || check === null) continue;
+        const kind = (check as { kind?: unknown }).kind;
+        if (kind === 'email') return 'email';
+        if (kind === 'url') return 'url';
+    }
+    return undefined;
 }
 
 let formIdCounter = 0;
@@ -175,6 +219,7 @@ export function Form<TInput extends z.ZodTypeAny = z.ZodTypeAny>(
         clearFieldError,
         validateField,
         uniquePrefix: prefix,
+        ...(props.fieldTypes === undefined ? {} : { fieldTypes: props.fieldTypes }),
     };
 
     // Form-level error summary banner
@@ -401,11 +446,19 @@ function createField(
     if (classification.kind === 'string') {
         const valSignal = signal<string>(typeof initialOrDef === 'string' ? initialOrDef : '');
 
+        // An explicit override wins; otherwise the schema's own checks decide; otherwise text.
+        const inputType: StringInputType =
+            ctx.fieldTypes?.[fieldPath] ?? inferStringInputType(classification.schema) ?? 'text';
+
         const inputEl = h('input', {
-            type: 'text',
+            type: inputType,
             id: fieldId,
             name: fieldPath,
             class: 'mesh-input',
+            // Lets a browser and a password manager recognise the field. Without it a manager
+            // either ignores the form or guesses, and guessing on a login form is how a password
+            // ends up typed into a username box.
+            autocomplete: inputType === 'password' ? 'current-password' : undefined,
             required: isRequired,
             value: () => valSignal(),
             'aria-describedby': () => hasError() ? errorId : helpId,
