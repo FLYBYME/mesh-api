@@ -1,5 +1,12 @@
 import './form.css';
-import { z, type ToolContract } from '@flybyme/mesh';
+// `z` from zod directly, and `ToolContract` as a type-only import so it is erased at compile time.
+//
+// `import { z } from '@flybyme/mesh'` is a *value* import of the mesh package root, which reaches
+// ContextStack, the Supervisor and express — dragging the entire server into any browser bundle
+// that touches a Form. Same constant, same instance, no server. See ../../../auth/roles.ts for the
+// other place this boundary leaked.
+import { z } from 'zod';
+import type { ToolContract } from '@flybyme/mesh';
 import type { Props, Child } from '../types.js';
 import { signal } from '../../reactivity/signal.js';
 import { computed } from '../../reactivity/computed.js';
