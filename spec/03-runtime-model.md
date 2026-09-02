@@ -106,3 +106,5 @@ Refusal is a normal outcome, not an error. Making it explicit in the API is what
 A hotkey switches between loaded top-level Apps, backgrounding the outgoing one rather than destroying it (`04-lifecycle.md`). This is a **real production feature of the console**, not a dev-only convenience: the console ships with the operational tooling its operator wants, and flipping to a running client site while a terminal session and live streams stay alive is part of that.
 
 Whether an end-user-facing deployment exposes the switcher is layout policy. A storefront loading exactly one App has nothing to switch to, and the chrome is simply absent.
+
+`13-applications-and-extensions.md` specifies the switcher properly — MRU ordering, a real hotkey parser, the overlay, per-app route memory — and names what the current implementation does not yet do. It also splits the "App" of this document into an **Application** and an **Extension**. The one-hosting-mechanism rule above is unchanged: Applications nest through the same compositor, and an Extension is not hosted in a surface at all.

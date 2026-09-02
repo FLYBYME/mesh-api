@@ -58,4 +58,5 @@ An app owns: its own views, its own state, its own contracts. It never positions
 | `10-build-and-serve.md` | Bundling, dev loop, serving from a mesh service. |
 | `11-example-kanban.md` | One worked example, end to end. |
 | `12-network-and-federation.md` | REST as the one API, namespaces, multi-site federation. |
+| `13-applications-and-extensions.md` | Application vs Extension, capability context, platform services, shell profiles, the view manager. |
 | `roadmap.md` | Build order, open questions, decisions not yet made. |
