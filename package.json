@@ -1,0 +1,37 @@
+{
+    "name": "@flybyme/mesh-api",
+    "version": "0.2.0",
+    "description": "The api ServiceModule: turns exposed mesh contracts into REST, SSE and WebSockets.",
+    "type": "module",
+    "private": true,
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "default": "./dist/index.js"
+        },
+        "./package.json": "./package.json"
+    },
+    "files": [
+        "dist",
+        "README.md"
+    ],
+    "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "typecheck": "tsc -p tsconfig.check.json --noEmit",
+        "test": "vitest run",
+        "test:watch": "vitest"
+    },
+    "dependencies": {
+        "@flybyme/mesh": "github:FLYBYME/mesh#v2.1.0",
+        "zod": "^3.25.76",
+        "zod-to-json-schema": "^3.24.6"
+    },
+    "devDependencies": {
+        "@types/node": "^22.0.0",
+        "typescript": "^5.9.3",
+        "vitest": "^2.1.9"
+    },
+    "license": "UNLICENSED"
+}
