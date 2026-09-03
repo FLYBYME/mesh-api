@@ -10,15 +10,15 @@
  * which is what lets a deployment put a process behind any address it likes, or ten of them.
  */
 
-import express, { Router, type Express } from 'express';
+import express, { Router, type Express, type RequestHandler } from 'express';
 import type { Server } from 'node:http';
 
 import { describeExposure, type ExposureDescriptor } from '../exposure/descriptor.js';
 import type { ExposeEntry } from '../exposure/types.js';
-import type { AuthorizeHook } from '../auth/gate.js';
+import { SCOPE_HEADER, type AuthorizeHook } from '../auth/gate.js';
 import { createTicketCache, type TicketCache, type Validator } from '../auth/tickets.js';
 import type { ApiBroker } from './broker.js';
-import { mountRest } from './rest.js';
+import { EXPOSURE_HEADER, mountRest } from './rest.js';
 import { mountEvents, type EventSource } from './sse.js';
 import type { EventExposeEntry } from '../exposure/events.js';
 
@@ -41,6 +41,20 @@ export interface ApiServerOptions {
     readonly events?: readonly EventExposeEntry[];
     readonly source?: EventSource;
     readonly onUnscopable?: (event: string, payload: unknown) => void;
+    /**
+     * Origins allowed to call this API from a browser.
+     *
+     * **Which origins may call a site is part of what the site exposes**, alongside which contracts
+     * and to whom — so it is declared here rather than defaulted by the server. Found while wiring
+     * the first real browser to a real API: in production the CDN and the API sit behind one proxy
+     * ([hosting §1](../../spec/hosting.md)) and the question never arises, so an implementation
+     * verified only against tests never has to answer it.
+     *
+     * Absent means **same-origin only**, which is both the production shape and the safe default.
+     * There is deliberately no wildcard: `*` plus credentials is the combination browsers refuse anyway, and
+     * a list someone typed is a list someone can review.
+     */
+    readonly allowOrigins?: readonly string[];
 }
 
 export interface ApiServer {
@@ -103,6 +117,11 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
         });
 
     const app = express();
+
+    // Before the body parser and before every route, because a preflight is answered rather than
+    // served: the browser asks whether the real request is allowed, and nothing else should run.
+    if (options.allowOrigins !== undefined) app.use(cors(options.allowOrigins, descriptor.exposure));
+
     app.use(express.json());
 
     // What this instance serves, from the instance itself. spec/network.md §6 — a client checks the
@@ -134,5 +153,52 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
                 server.once('error', reject);
             });
         },
+    };
+}
+
+/**
+ * Cross-origin access, for the origins the site declared.
+ *
+ * Written by hand rather than pulled in as a dependency because the interesting part is what is
+ * *not* here: no wildcard, no reflect-any-origin, and no `Access-Control-Allow-Credentials`. This
+ * API authenticates with a ticket in a header, not a cookie, so a browser never needs to be told to
+ * send credentials cross-origin — which removes the one CORS configuration that turns a permissive
+ * origin list into a session-riding hole.
+ *
+ * `x-exposure` is exposed to the page deliberately: the generated client reads it to notice it has
+ * gone stale (spec/network.md §6), and a header the browser hides is a check that silently never
+ * runs.
+ */
+function cors(allowed: readonly string[], exposure: string): RequestHandler {
+    const origins = new Set(allowed);
+
+    return (req, res, next) => {
+        const origin = req.headers.origin;
+
+        // Not a browser request, or an origin this site does not serve. Either way there is nothing
+        // to add — and an unknown origin is answered normally rather than refused, because the
+        // absence of the header is already the refusal the browser enforces.
+        if (typeof origin !== 'string' || !origins.has(origin)) {
+            if (req.method === 'OPTIONS') { res.sendStatus(403); return; }
+            next();
+            return;
+        }
+
+        res.setHeader('access-control-allow-origin', origin);
+        // The response varies by origin, so a shared cache must not serve one origin's answer to
+        // another. Cheap to add and invisible when wrong, which is the worst combination.
+        res.setHeader('vary', 'Origin');
+        res.setHeader('access-control-expose-headers', `${EXPOSURE_HEADER}, x-correlation-id`);
+
+        if (req.method === 'OPTIONS') {
+            res.setHeader('access-control-allow-methods', 'GET, POST, PUT, PATCH, DELETE');
+            res.setHeader('access-control-allow-headers', `content-type, authorization, ${SCOPE_HEADER}`);
+            res.setHeader('access-control-max-age', '600');
+            res.setHeader(EXPOSURE_HEADER, exposure);
+            res.sendStatus(204);
+            return;
+        }
+
+        next();
     };
 }

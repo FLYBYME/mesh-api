@@ -48,6 +48,8 @@ export const EXPOSURE_HEADER = 'x-exposure';
 interface ErrorBody {
     readonly error: string;
     readonly message: string;
+    /** Present and true only for a failure the contract declared. See DeclaredFailure. */
+    readonly declared?: true;
 }
 
 export function mountRest(router: Router, options: MountOptions): void {
@@ -160,10 +162,56 @@ async function serve(
  * a connection string) that must never reach a client. The real error goes to `onError` instead.
  */
 export function toHttpError(error: unknown): { status: number; body: ErrorBody } {
+    // A failure the contract named. Marked `declared` on the wire, because without that marker it is
+    // indistinguishable from a gate refusal — see DeclaredFailure.
+    if (error instanceof DeclaredFailure) {
+        return {
+            status: error.status,
+            body: { error: error.name_, message: error.message, declared: true },
+        };
+    }
+
     if (error instanceof MeshError) {
         return { status: error.status, body: { error: error.code, message: error.message } };
     }
+
     return { status: 500, body: { error: 'INTERNAL_ERROR', message: 'Internal server error' } };
+}
+
+/**
+ * A failure this contract declared, thrown by a handler.
+ *
+ * Found the moment a real browser called a real API: every gate refusal was arriving at the client
+ * as a *declared* failure. The server answered a 401 with `{ error: 'UNAUTHENTICATED', message }`,
+ * and the client's rule for "the site named this failure itself" was *a body with a string `error`*
+ * — which that is. Two designs, made on opposite sides of the wire, agreeing on a shape and meaning
+ * different things by it.
+ *
+ * Neither side was wrong on its own, and neither side's tests could see it: the client's fake server
+ * only ever produced one of the two shapes, and the server's tests never parsed its own output the
+ * way a client does. It took one real request to find, which is the argument for this whole
+ * integration in one bug.
+ *
+ * So the two are now different on the wire. `declared: true` is the marker, and it is explicit
+ * rather than inferred from a status code — a site is free to answer a declared failure with
+ * whatever status suits it, and the caller still knows which kind it is.
+ */
+export class DeclaredFailure extends Error {
+    /**
+     * The declared name, e.g. `title_taken`.
+     *
+     * Not `name`, because `Error.name` already exists and means something else — a subclass that
+     * overwrote it would break every `instanceof`-free check and every stack trace header.
+     */
+    readonly name_: string;
+    readonly status: number;
+
+    constructor(name: string, message: string, status = 400) {
+        super(message);
+        this.name = 'DeclaredFailure';
+        this.name_ = name;
+        this.status = status;
+    }
 }
 
 /** 201 for a creation, 200 otherwise. */

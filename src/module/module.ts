@@ -57,6 +57,8 @@ export interface ApiModuleOptions {
      * cluster-wide view turns it on.
      */
     readonly recordExposure?: boolean;
+    /** Origins allowed to call this API from a browser. See ApiServerOptions.allowOrigins. */
+    readonly allowOrigins?: readonly string[];
     /** How often to refresh the row, so a dead instance's row can be told from a live one. */
     readonly heartbeatMs?: number;
 }
@@ -133,6 +135,7 @@ export function createApiModule(options: ApiModuleOptions): ApiModule {
                 ...(options.base === undefined ? {} : { base: options.base }),
                 ...(options.onError === undefined ? {} : { onError: options.onError }),
                 ...(options.onUnscopable === undefined ? {} : { onUnscopable: options.onUnscopable }),
+                ...(options.allowOrigins === undefined ? {} : { allowOrigins: options.allowOrigins }),
                 // No validate tool means no ticket is ever valid, which is correct for a site
                 // exposing only public contracts and refuses everything else — rather than a
                 // default that quietly admits people.

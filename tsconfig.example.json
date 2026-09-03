@@ -1,0 +1,15 @@
+// The runnable example (roadmap A3.1 integration).
+//
+// Its own project rather than part of src/, so the published package stays the library and the
+// example is still held to the same compiler settings — it imports ../src, so if the public surface
+// changes under it, this fails to compile rather than failing at run time.
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "rootDir": ".",
+        "outDir": "example/dist",
+        "declaration": false,
+        "declarationMap": false
+    },
+    "include": ["example/**/*.ts", "src/**/*.ts"]
+}

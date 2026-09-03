@@ -24,7 +24,9 @@
         "build": "tsc -p tsconfig.json",
         "typecheck": "tsc -p tsconfig.check.json --noEmit",
         "test": "vitest run",
-        "test:watch": "vitest"
+        "test:watch": "vitest",
+        "example:blog": "tsc -p tsconfig.example.json && node example/dist/example/blog.js",
+        "example:client": "tsc -p tsconfig.example.json && node example/dist/example/generate.js"
     },
     "dependencies": {
         "@flybyme/mesh": "github:FLYBYME/mesh#v2.1.0",
