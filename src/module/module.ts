@@ -49,6 +49,16 @@ export interface ApiModuleOptions {
     readonly validateTool?: string;
     readonly onError?: (error: unknown, context: { readonly key: string }) => void;
     readonly onUnscopable?: (event: string, payload: unknown) => void;
+    /**
+     * Record what this instance serves in the `exposure` collection (C3.1c).
+     *
+     * Off by default, because it needs a database and this module does not otherwise have one — a
+     * listener that will not start without mongo is a worse listener. A deployment that wants the
+     * cluster-wide view turns it on.
+     */
+    readonly recordExposure?: boolean;
+    /** How often to refresh the row, so a dead instance's row can be told from a live one. */
+    readonly heartbeatMs?: number;
 }
 
 export interface ApiModule extends IServiceModule {
@@ -68,6 +78,7 @@ export function createApiModule(options: ApiModuleOptions): ApiModule {
     let api: ApiServer | undefined;
     let listener: Server | undefined;
     let broker: IServiceBroker | undefined;
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
 
     const contracts: ToolContract<z.ZodTypeAny, z.ZodTypeAny>[] = [
         apiStatusContract as unknown as ToolContract<z.ZodTypeAny, z.ZodTypeAny>,
@@ -131,6 +142,21 @@ export function createApiModule(options: ApiModuleOptions): ApiModule {
             });
 
             listener = await api.listen(options.port, options.host);
+
+            if (options.recordExposure === true) {
+                await recordExposure(apiBroker, started, api, options);
+                // Refreshed rather than written once: a row nobody updates cannot be told from the
+                // row of an instance that died, and "which instances are actually serving this
+                // hash" is the only question the collection exists to answer.
+                heartbeat = setInterval(() => {
+                    void recordExposure(apiBroker, started, api!, options).catch((error: unknown) => {
+                        started.logger.warn('[api] could not refresh the exposure row:', error);
+                    });
+                }, options.heartbeatMs ?? DEFAULT_EXPOSURE_HEARTBEAT_MS);
+                // Never hold the process open for a heartbeat.
+                heartbeat.unref?.();
+            }
+
             started.logger.info(
                 `[api] ${options.application} listening on ${options.host ?? '0.0.0.0'}:${String(options.port)} — ` +
                 `${String(api.descriptor.calls.length)} calls at ${api.descriptor.exposure}`,
@@ -138,6 +164,8 @@ export function createApiModule(options: ApiModuleOptions): ApiModule {
         },
 
         async onStop(): Promise<void> {
+            if (heartbeat !== undefined) clearInterval(heartbeat);
+            heartbeat = undefined;
             api?.events?.close();
             await new Promise<void>((resolve) => {
                 if (listener === undefined) return resolve();
@@ -183,6 +211,53 @@ export function createApiModule(options: ApiModuleOptions): ApiModule {
         get listener(): Server | undefined { return listener; },
         get api(): ApiServer | undefined { return api; },
     };
+}
+
+export const DEFAULT_EXPOSURE_HEARTBEAT_MS = 20_000;
+
+/**
+ * Write this instance's row.
+ *
+ * An upsert keyed by (application, nodeID), because the row is a fact about a *process*. Doing it
+ * as find-then-create-or-update rather than assuming an upsert action exists keeps this working
+ * against a plain `defineCrud` collection, which is what the site will actually have.
+ *
+ * Failures are logged and swallowed: an API that refuses to serve because it could not write a
+ * bookkeeping row would be trading the thing that matters for the thing that describes it.
+ */
+async function recordExposure(
+    broker: ApiBroker,
+    started: IServiceBroker,
+    api: ApiServer,
+    options: ApiModuleOptions,
+): Promise<void> {
+    const now = new Date();
+    const row = {
+        application: options.application,
+        nodeID: started.nodeID,
+        exposure: api.descriptor.exposure,
+        base: api.descriptor.base,
+        calls: api.descriptor.calls.length,
+        events: options.events?.length ?? 0,
+        heartbeatAt: now,
+    };
+
+    try {
+        const existing = await broker.call('exposure.find', {
+            query: { application: options.application, nodeID: started.nodeID },
+            limit: 1,
+        }) as { id: string }[] | undefined;
+
+        const found = Array.isArray(existing) ? existing[0] : undefined;
+
+        if (found === undefined) {
+            await broker.call('exposure.create', { ...row, startedAt: now });
+        } else {
+            await broker.call('exposure.update', { id: found.id, ...row });
+        }
+    } catch (error) {
+        started.logger.warn('[api] could not record this instance in the exposure collection:', error);
+    }
 }
 
 function addressOf(server: Server | undefined): number | null {

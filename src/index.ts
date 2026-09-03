@@ -29,3 +29,4 @@ export * from './module/module.js';
 export * from './generate/schema.js';
 export * from './generate/emit.js';
 export * from './generate/cli.js';
+export * from './module/exposure-collection.js';
