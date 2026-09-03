@@ -40,6 +40,8 @@ export interface DescribedCall {
     readonly destructive: boolean;
     /** True when the response is a stream rather than a value. */
     readonly stream: boolean;
+    /** Failures this call names, emitted into the generated client as a literal union. */
+    readonly errors: readonly string[];
 }
 
 export interface ExposureDescriptor {
@@ -134,6 +136,8 @@ export function describeExposure(
             output: schemaOf(contract, 'outputSchema'),
             destructive: contract.destructive === true,
             stream: contract.rest.isStream === true,
+            // Sorted, so a reordered declaration is not a change to the exposure hash.
+            errors: [...(entry.errors ?? [])].sort(),
         });
     }
 

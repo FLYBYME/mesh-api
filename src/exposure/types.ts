@@ -23,11 +23,22 @@ import type { ToolContract, z } from '@flybyme/mesh';
  */
 export type AuthLevel = 'public' | 'user' | 'admin';
 
+/**
+ * Failures this call names, beyond the transport ones every call has.
+ *
+ * Carried into the descriptor and emitted into the generated client as a literal union, so a caller
+ * switching on `error.name` is checked (mesh-web spec/type-safety.md §5, roadmap A3.1c). Declared
+ * here rather than derived from the handler because a failure is part of a contract's public
+ * surface: which errors a caller must handle should not change silently when a handler is edited.
+ */
+export type DeclaredErrors = readonly string[];
+
 /** One contract reachable from outside the mesh, behind a coarse gate. */
 export interface AuthExposeEntry {
     readonly contract: ToolContract<z.ZodTypeAny, z.ZodTypeAny>;
     readonly auth: AuthLevel;
     readonly permission?: never;
+    readonly errors?: DeclaredErrors;
 }
 
 /**
@@ -41,6 +52,7 @@ export interface PermissionExposeEntry {
     readonly contract: ToolContract<z.ZodTypeAny, z.ZodTypeAny>;
     readonly permission: string;
     readonly auth?: never;
+    readonly errors?: DeclaredErrors;
 }
 
 export type ExposeEntry = AuthExposeEntry | PermissionExposeEntry;

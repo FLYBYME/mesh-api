@@ -26,3 +26,6 @@ export * from './server/sse.js';
 export * from './module/contracts.js';
 export * from './module/identity.js';
 export * from './module/module.js';
+export * from './generate/schema.js';
+export * from './generate/emit.js';
+export * from './generate/cli.js';

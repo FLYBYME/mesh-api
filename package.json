@@ -13,6 +13,9 @@
         },
         "./package.json": "./package.json"
     },
+    "bin": {
+        "mesh-api-generate-client": "./dist/generate/cli.js"
+    },
     "files": [
         "dist",
         "README.md"
