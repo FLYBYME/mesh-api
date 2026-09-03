@@ -14,3 +14,5 @@
  */
 export * from './exposure/types.js';
 export * from './exposure/descriptor.js';
+export * from './auth/gate.js';
+export * from './auth/tickets.js';
