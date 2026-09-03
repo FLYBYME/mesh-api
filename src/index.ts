@@ -23,3 +23,6 @@ export * from './server/server.js';
 export * from './exposure/events.js';
 export * from './server/delivery.js';
 export * from './server/sse.js';
+export * from './module/contracts.js';
+export * from './module/identity.js';
+export * from './module/module.js';

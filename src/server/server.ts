@@ -19,6 +19,8 @@ import type { AuthorizeHook } from '../auth/gate.js';
 import { createTicketCache, type TicketCache, type Validator } from '../auth/tickets.js';
 import type { ApiBroker } from './broker.js';
 import { mountRest } from './rest.js';
+import { mountEvents, type EventSource } from './sse.js';
+import type { EventExposeEntry } from '../exposure/events.js';
 
 export interface ApiServerOptions {
     readonly application: string;
@@ -35,6 +37,10 @@ export interface ApiServerOptions {
     readonly base?: string;
     readonly allowInternal?: boolean;
     readonly onError?: (error: unknown, context: { readonly key: string }) => void;
+    /** Exposed event streams. Requires `source`; declaring one without the other is a mistake. */
+    readonly events?: readonly EventExposeEntry[];
+    readonly source?: EventSource;
+    readonly onUnscopable?: (event: string, payload: unknown) => void;
 }
 
 export interface ApiServer {
@@ -42,6 +48,8 @@ export interface ApiServer {
     /** What this instance serves, and the hash of it. `api_routes` and `api_status` read this. */
     readonly descriptor: ExposureDescriptor;
     readonly tickets: TicketCache;
+    /** Present only when event streams were exposed. `close()` drops every subscriber. */
+    readonly events: { readonly close: () => void; readonly connections: () => number } | undefined;
     listen(port: number, host?: string): Promise<Server>;
 }
 
@@ -64,7 +72,16 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
         validate: options.validateTicket ?? (async () => ({ valid: false })),
     });
 
+    if ((options.events === undefined) !== (options.source === undefined)) {
+        throw new Error(
+            'createApiServer: `events` and `source` go together. Exposed events with nothing to ' +
+            'listen to would be a subscription that never fires, which looks exactly like a quiet ' +
+            'system.',
+        );
+    }
+
     const router = Router();
+
     mountRest(router, {
         broker: options.broker,
         expose: options.expose,
@@ -73,6 +90,17 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
         ...(options.authorize === undefined ? {} : { authorize: options.authorize }),
         ...(options.onError === undefined ? {} : { onError: options.onError }),
     });
+
+    const events = options.events === undefined || options.source === undefined
+        ? undefined
+        : mountEvents(router, {
+            source: options.source,
+            events: options.events,
+            tickets,
+            exposure: descriptor.exposure,
+            ...(options.authorize === undefined ? {} : { authorize: options.authorize }),
+            ...(options.onUnscopable === undefined ? {} : { onUnscopable: options.onUnscopable }),
+        });
 
     const app = express();
     app.use(express.json());
@@ -99,6 +127,7 @@ export function createApiServer(options: ApiServerOptions): ApiServer {
         app,
         descriptor,
         tickets,
+        events,
         listen(port: number, host = '0.0.0.0'): Promise<Server> {
             return new Promise((resolve, reject) => {
                 const server = app.listen(port, host, () => resolve(server));
