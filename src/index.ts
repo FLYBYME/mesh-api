@@ -16,6 +16,7 @@ export * from './exposure/types.js';
 export * from './exposure/descriptor.js';
 export * from './auth/gate.js';
 export * from './auth/tickets.js';
+export * from './auth/revocations.js';
 export * from './server/broker.js';
 export * from './server/input.js';
 export * from './server/rest.js';

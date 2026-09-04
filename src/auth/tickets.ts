@@ -62,8 +62,16 @@ interface Entry {
 export interface TicketCache {
     /** Who is calling. `undefined` means no valid ticket — the caller is anonymous, not refused. */
     resolve(ticket: string | undefined): Promise<Caller | undefined>;
-    /** A revocation arrived. Called from the event subscription. */
+    /** A revocation arrived. Called from the event subscription, and from the poller. */
     revoke(ticket: string): void;
+    /**
+     * Everything belonging to a principal.
+     *
+     * identity records a revocation *by user* as one row rather than one per ticket, because a
+     * consumer that drops everything for that user is correct and cheaper — and because a ticket
+     * issued a moment later is covered by the same row. This is the consumer side of that.
+     */
+    revokePrincipal(userId: string): number;
     /** Identity says everything is suspect, or this instance cannot trust what it holds. */
     clear(): void;
     /**
@@ -151,6 +159,18 @@ export function createTicketCache(options: TicketCacheOptions): TicketCache {
 
         revoke(ticket: string): void {
             entries.delete(ticket);
+        },
+
+        revokePrincipal(userId: string): number {
+            let dropped = 0;
+            for (const [ticket, entry] of entries) {
+                // Negative entries have no caller and belong to nobody, so they are left alone —
+                // dropping them would make an attacker's invalid ticket cost a mesh call again.
+                if (entry.caller?.userId !== userId) continue;
+                entries.delete(ticket);
+                dropped += 1;
+            }
+            return dropped;
         },
 
         clear(): void {

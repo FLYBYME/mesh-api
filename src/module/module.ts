@@ -35,6 +35,7 @@ import { createApiServer, type ApiServer } from '../server/server.js';
 import type { ApiBroker } from '../server/broker.js';
 import type { EventSource } from '../server/sse.js';
 import { identityValidator } from './identity.js';
+import { revocationPoller, type RevocationPoller } from '../auth/revocations.js';
 import { apiRoutesContract, apiStatusContract } from './contracts.js';
 
 export interface ApiModuleOptions {
@@ -61,6 +62,15 @@ export interface ApiModuleOptions {
     readonly allowOrigins?: readonly string[];
     /** How often to refresh the row, so a dead instance's row can be told from a live one. */
     readonly heartbeatMs?: number;
+    /**
+     * Poll identity for revocations — mesh-web auth §3.1 and roadmap C1.9a.
+     *
+     * On whenever `validateTool` is set, because a ticket cache without it is a cache that keeps
+     * serving revoked tickets to any instance that missed the event, and the mesh delivers events
+     * at-most-once. Set the interval to `0` to disable it, which is a decision rather than a default.
+     */
+    readonly revocationPollMs?: number;
+    readonly revocationsTool?: string;
 }
 
 export interface ApiModule extends IServiceModule {
@@ -81,6 +91,7 @@ export function createApiModule(options: ApiModuleOptions): ApiModule {
     let listener: Server | undefined;
     let broker: IServiceBroker | undefined;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
+    let poller: RevocationPoller | undefined;
 
     const contracts: ToolContract<z.ZodTypeAny, z.ZodTypeAny>[] = [
         apiStatusContract as unknown as ToolContract<z.ZodTypeAny, z.ZodTypeAny>,
@@ -146,6 +157,20 @@ export function createApiModule(options: ApiModuleOptions): ApiModule {
 
             listener = await api.listen(options.port, options.host);
 
+            // The mesh delivers events at-most-once (auth §3.1), so an instance that was down when
+            // a ticket was revoked would otherwise keep serving it until the cache TTL. The poll is
+            // what makes revocation correct; the event, where one arrives, makes it fast.
+            if (options.validateTool !== undefined && options.revocationPollMs !== 0) {
+                poller = revocationPoller({
+                    broker: apiBroker,
+                    cache: api.tickets,
+                    ...(options.revocationsTool === undefined ? {} : { tool: options.revocationsTool }),
+                    ...(options.revocationPollMs === undefined ? {} : { intervalMs: options.revocationPollMs }),
+                    onError: (error) => started.logger.warn('[api] revocation poll failed:', error),
+                });
+                poller.start();
+            }
+
             if (options.recordExposure === true) {
                 await recordExposure(apiBroker, started, api, options);
                 // Refreshed rather than written once: a row nobody updates cannot be told from the
@@ -167,6 +192,8 @@ export function createApiModule(options: ApiModuleOptions): ApiModule {
         },
 
         async onStop(): Promise<void> {
+            poller?.stop();
+            poller = undefined;
             if (heartbeat !== undefined) clearInterval(heartbeat);
             heartbeat = undefined;
             api?.events?.close();
